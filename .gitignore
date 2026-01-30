@@ -1,0 +1,46 @@
+# Gradle
+.gradle/
+build/
+!gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+
+# Kotlin
+*.class
+*.kotlin_module
+
+# Android
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# iOS
+iosApp/Pods/
+iosApp/.symlinks/
+iosApp/Flutter/
+iosApp/*.xcworkspace
+!iosApp/*.xcworkspace/contents.xcworkspacedata
+iosApp/xcuserdata/
+iosApp/DerivedData/
+iosApp/*.pbxuser
+iosApp/*.mode1v3
+iosApp/*.mode2v3
+iosApp/*.perspectivev3
+iosApp/*.xccheckout
+iosApp/*.moved-aside
+iosApp/**/xcshareddata/
+iosApp/**/xcuserdata/
+
+# Misc
+*.log
+*.tmp
+*.temp
+.env
+.env.local
