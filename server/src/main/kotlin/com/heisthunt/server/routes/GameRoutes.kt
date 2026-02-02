@@ -61,10 +61,10 @@ fun Route.gameRoutes() {
                         return@transaction StartGameResult.NotAllReady
                     }
 
-                    // Assign roles
-                    val policeCount = (participants.size * room[Rooms.policeRatio]).toInt().coerceAtLeast(1)
-                    val shuffled = participants.shuffled()
-                    val policeIds = shuffled.take(policeCount).map { it[RoomParticipants.userId] }
+                    // Assign roles - respect selectedRole if set, otherwise random
+                    val policeIds = participants
+                        .filter { it[RoomParticipants.selectedRole] == PlayerRole.POLICE.name }
+                        .map { it[RoomParticipants.userId] }
 
                     // Update room status
                     val now = Clock.System.now()

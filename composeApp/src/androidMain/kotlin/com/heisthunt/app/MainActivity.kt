@@ -26,8 +26,9 @@ class MainActivity : ComponentActivity() {
                 onGoogleLogin = suspend {
                     android.util.Log.d("MainActivity", "Google login started")
                     val result = googleAuthService.signIn()
-                    android.util.Log.d("MainActivity", "Google login result: success=${result.success}, error=${result.error}")
+                    android.util.Log.d("MainActivity", "Google login result: success=${result.success}, email=${result.email}, error=${result.error}")
                     if (result.success && result.email != null) {
+                        android.util.Log.d("MainActivity", "Calling backend with email: ${result.email}")
                         // Authenticate with backend server
                         try {
                             val authResult = withContext(Dispatchers.IO) {
@@ -44,6 +45,7 @@ class MainActivity : ComponentActivity() {
                                     true
                                 },
                                 onFailure = { error ->
+                                    android.util.Log.e("MainActivity", "Backend login failed: ${error.message}", error)
                                     Toast.makeText(
                                         this,
                                         "서버 로그인 실패: ${error.message}",
@@ -53,6 +55,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Backend connection error", e)
                             Toast.makeText(
                                 this,
                                 "서버 연결 실패: ${e.message}",
@@ -62,6 +65,7 @@ class MainActivity : ComponentActivity() {
                         }
                     } else {
                         // Handle specific error cases
+                        android.util.Log.d("MainActivity", "Login failed or email is null. success=${result.success}, email=${result.email}, error=${result.error}")
                         when {
                             result.error?.contains("No Google account found") == true -> {
                                 showAddAccountDialog()

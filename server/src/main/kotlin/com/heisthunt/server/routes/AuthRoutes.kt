@@ -152,7 +152,7 @@ fun Route.authRoutes() {
                 }
                 LoginResult.InvalidCredentials -> {
                     call.respond(
-                        HttpStatusCode.Unauthorized,
+                        HttpStatusCode.BadRequest,
                         ApiResponse<Unit>(success = false, error = ErrorResponse(ErrorCodes.INVALID_CREDENTIALS, "Invalid email or password"))
                     )
                 }

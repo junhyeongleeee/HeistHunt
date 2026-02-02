@@ -264,10 +264,17 @@ private fun StatusBar(
                 Color(0xFF3B82F6) // blue-500
             }
 
+            // Use escape timer during ESCAPE phase, total timer during CHASE
+            val progress = if (gamePhase == "ESCAPE") {
+                (escapeTimeLeft.toFloat() / 300f).coerceIn(0f, 1f)
+            } else {
+                (timeLeft.toFloat() / totalGameTime.toFloat()).coerceIn(0f, 1f)
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .fillMaxWidth((timeLeft.toFloat() / totalGameTime.toFloat()).coerceIn(0f, 1f))
+                    .fillMaxWidth(progress)
                     .background(progressColor, RoundedCornerShape(2.dp))
             )
         }
