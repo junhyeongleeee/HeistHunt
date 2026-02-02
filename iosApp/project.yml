@@ -1,0 +1,31 @@
+name: iosApp
+options:
+  bundleIdPrefix: com.heisthunt
+  deploymentTarget:
+    iOS: "15.0"
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  iosApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: iosApp
+        type: group
+    resources:
+      - path: iosApp/GoogleService-Info.plist
+    settings:
+      base:
+        INFOPLIST_FILE: iosApp/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.heisthunt.app
+        PRODUCT_NAME: HeistHunt
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(SRCROOT)/../composeApp/build/bin/iosSimulatorArm64/debugFramework"
+          - "$(SRCROOT)/../composeApp/build/bin/iosArm64/releaseFramework"
+        OTHER_LDFLAGS:
+          - "-framework"
+          - "ComposeApp"
+    dependencies: []

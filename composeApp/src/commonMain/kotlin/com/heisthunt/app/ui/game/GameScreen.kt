@@ -1,0 +1,869 @@
+package com.heisthunt.app.ui.game
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.heisthunt.app.viewmodel.GameUiState
+import com.heisthunt.shared.models.PlayerLocation
+import com.heisthunt.shared.models.PlayerRole
+import com.heisthunt.shared.models.Room
+
+@Composable
+fun GameScreen(
+    gameId: String,
+    myRole: PlayerRole,
+    room: Room?,
+    onBack: () -> Unit,
+    uiState: GameUiState?,
+    onRequestCatch: (thiefUserId: String, policeUserId: String, policeNickname: String) -> Unit,
+    onConfirmCatch: (thiefUserId: String, thiefNickname: String) -> Unit,
+    onRejectCatch: (thiefUserId: String) -> Unit,
+    onDismissCatchRequest: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Use real data from local timer (hybrid approach)
+    val timeLeft = uiState?.localRemainingSeconds?.toInt() ?: 300
+    val escapeTimeLeft = uiState?.localEscapeRemainingSeconds?.toInt() ?: 300
+    val totalGameTime = uiState?.totalDurationSeconds?.toInt() ?: 1200
+    val distanceFromCenter = 450 // TODO: Calculate from myLocation
+    val maxRadius = 500
+    val gamePhase = uiState?.currentPhase ?: "ESCAPE"
+    val remainingThieves = uiState?.gameStatus?.remainingThieves ?: 3
+    val totalThieves = uiState?.gameStatus?.totalThieves ?: 5
+
+    // BackHandler
+    BackHandler(onBack = onBack)
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .navigationBarsPadding()
+                .background(Color(0xFF020617)) // slate-950
+        ) {
+            // Status Bar (상단)
+            StatusBar(
+                role = myRole,
+                timeLeft = timeLeft,
+                escapeTimeLeft = escapeTimeLeft,
+                totalGameTime = totalGameTime,
+                gamePhase = gamePhase,
+                distanceFromCenter = distanceFromCenter,
+                maxRadius = maxRadius
+            )
+
+            // Map Section (지도)
+            Box(modifier = Modifier.weight(1f)) {
+                GameMapView(
+                    myLocation = uiState?.myLocation,
+                    playerLocations = uiState?.playerLocations ?: emptyList(),
+                    myRole = myRole,
+                    safeRadiusMeters = maxRadius.toDouble(),
+                    gameCenterLocation = uiState?.myLocation, // TODO: Get actual game center from server
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // GPS/Location 에러는 표시하지 않음 (실내에서도 게임 가능)
+
+                // Police: Thief detection alert
+                if (myRole == PlayerRole.POLICE && uiState?.nearbyThieves?.isNotEmpty() == true) {
+                    CatchDetectionAlert(
+                        nearbyThievesCount = uiState.nearbyThieves.size,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+            }
+
+            // Action Footer (하단)
+            ActionFooter(
+                role = myRole,
+                gamePhase = gamePhase,
+                remainingThieves = remainingThieves,
+                totalThieves = totalThieves,
+                nearbyThieves = uiState?.nearbyThieves ?: emptyList(),
+                onRequestCatch = onRequestCatch
+            )
+        }
+
+        // Thief: Catch request dialog
+        uiState?.catchRequest?.let { request ->
+            CatchRequestDialog(
+                policeNickname = request.policeNickname,
+                onConfirm = { onConfirmCatch(request.thiefUserId, "Me") }, // TODO: Get my nickname
+                onReject = { onRejectCatch(request.thiefUserId) },
+                onDismiss = onDismissCatchRequest
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusBar(
+    role: PlayerRole,
+    timeLeft: Int,
+    escapeTimeLeft: Int,
+    totalGameTime: Int,
+    gamePhase: String,
+    distanceFromCenter: Int,
+    maxRadius: Int
+) {
+    val backgroundColor = if (role == PlayerRole.THIEF) {
+        Color(0xFF450A0A) // red-950/20
+    } else {
+        Color(0xFF172554) // blue-950/20
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(backgroundColor)
+            .border(1.dp, Color(0xFF0F172A), RoundedCornerShape(0.dp))
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .padding(top = 32.dp)
+    ) {
+        // Timer and Radius Info
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            // Mission Time - 페이즈별로 다른 타이머 표시
+            Column {
+                if (gamePhase == "ESCAPE") {
+                    // ESCAPE 페이즈: 도망 시간 타이머
+                    Text(
+                        text = "ESCAPE TIME",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.5.sp,
+                        color = Color(0xFF22C55E) // green-500
+                    )
+
+                    val minutes = escapeTimeLeft / 60
+                    val seconds = escapeTimeLeft % 60
+                    val timeColor = if (escapeTimeLeft < 60) Color(0xFFFBBF24) else Color(0xFF22C55E) // yellow or green
+
+                    Text(
+                        text = String.format("%d:%02d", minutes, seconds),
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Black,
+                        fontStyle = FontStyle.Italic,
+                        color = timeColor,
+                        modifier = if (escapeTimeLeft < 60) {
+                            Modifier.alpha(
+                                rememberInfiniteTransition().animateFloat(
+                                    initialValue = 0.5f,
+                                    targetValue = 1f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(500),
+                                        repeatMode = RepeatMode.Reverse
+                                    )
+                                ).value
+                            )
+                        } else Modifier
+                    )
+                } else {
+                    // CHASE 페이즈: 전체 게임 시간 타이머
+                    Text(
+                        text = "GAME TIME",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.5.sp,
+                        color = Color(0xFF64748B) // slate-500
+                    )
+
+                    val minutes = timeLeft / 60
+                    val seconds = timeLeft % 60
+                    val timeColor = if (timeLeft < 60) Color(0xFFEF4444) else Color.White
+
+                    Text(
+                        text = String.format("%d:%02d", minutes, seconds),
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Black,
+                        fontStyle = FontStyle.Italic,
+                        color = timeColor,
+                        modifier = if (timeLeft < 60) {
+                            Modifier.alpha(
+                                rememberInfiniteTransition().animateFloat(
+                                    initialValue = 0.5f,
+                                    targetValue = 1f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(500),
+                                        repeatMode = RepeatMode.Reverse
+                                    )
+                                ).value
+                            )
+                        } else Modifier
+                    )
+                }
+            }
+
+            // Safe Radius
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "SAFE RADIUS",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.5.sp,
+                    color = Color(0xFF64748B)
+                )
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    val radiusColor = if (distanceFromCenter > maxRadius - 50) {
+                        Color(0xFFEF4444) // red-500
+                    } else {
+                        Color(0xFF22C55E) // green-500
+                    }
+
+                    Text(
+                        text = "${distanceFromCenter}m",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black,
+                        color = radiusColor
+                    )
+                    Text(
+                        text = "/ ${maxRadius}m",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Progress Indicator
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .background(Color(0xFF1E293B), RoundedCornerShape(2.dp))
+        ) {
+            val progressColor = if (role == PlayerRole.THIEF) {
+                Color(0xFFDC2626) // red-600
+            } else {
+                Color(0xFF3B82F6) // blue-500
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth((timeLeft.toFloat() / totalGameTime.toFloat()).coerceIn(0f, 1f))
+                    .background(progressColor, RoundedCornerShape(2.dp))
+            )
+        }
+    }
+}
+
+@Composable
+private fun MapErrorOverlay(
+    errorMessage: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0x80000000)) // semi-transparent black
+            .padding(16.dp),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .padding(top = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = Color(0xE6DC2626) // red-600/90
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "⚠️",
+                    fontSize = 20.sp
+                )
+                Text(
+                    text = errorMessage,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    color = Color.White
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatchDetectionAlert(
+    nearbyThievesCount: Int,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth(0.9f)
+            .padding(top = 16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xE62563EB) // blue-600/90
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .alpha(
+                    rememberInfiniteTransition().animateFloat(
+                        initialValue = 0.7f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(500),
+                            repeatMode = RepeatMode.Reverse
+                        )
+                    ).value
+                ),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "🎯",
+                fontSize = 24.sp
+            )
+            Column {
+                Text(
+                    text = "도둑 감지!",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+                Text(
+                    text = "반경 5m 이내에 도둑 ${nearbyThievesCount}명",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatchRequestDialog(
+    policeNickname: String,
+    onConfirm: () -> Unit,
+    onReject: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "🚨",
+                    fontSize = 40.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "체포 요청",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        },
+        text = {
+            Text(
+                text = "경찰 '$policeNickname'이(가) 당신을 체포했다고 주장합니다.\n\n정말 잡혔습니까?",
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFDC2626) // red-600
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "인정 (감옥으로 이동)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onReject,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, Color(0xFF64748B))
+            ) {
+                Text(
+                    text = "거부",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+        },
+        containerColor = Color(0xFF0F172A),
+        titleContentColor = Color.White,
+        textContentColor = Color.White
+    )
+}
+
+@Composable
+private fun CatchTargetDialog(
+    nearbyThieves: List<PlayerLocation>,
+    onSelectThief: (thiefUserId: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "🎯",
+                    fontSize = 40.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "체포 대상 선택",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "누구를 체포하시겠습니까?",
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                nearbyThieves.forEach { thief ->
+                    Button(
+                        onClick = { onSelectThief(thief.userId) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2563EB) // blue-600
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.Start,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "도둑 ${thief.userId.take(8)}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                text = "위치: ${String.format("%.6f", thief.location.latitude)}, ${String.format("%.6f", thief.location.longitude)}",
+                                fontSize = 10.sp,
+                                modifier = Modifier.alpha(0.7f)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, Color(0xFF64748B))
+            ) {
+                Text(
+                    text = "취소",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+        },
+        containerColor = Color(0xFF0F172A),
+        titleContentColor = Color.White,
+        textContentColor = Color.White
+    )
+}
+
+// Legacy MapSection - kept for reference, can be removed later
+@Composable
+private fun MapSection_Legacy(
+    role: PlayerRole,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF0F172A)) // slate-900
+    ) {
+        // TODO: Replace with actual Google Maps
+        // Simulated map background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(0.4f)
+                .background(Color(0xFF1E293B))
+        )
+
+        // Radius guideline (dashed circle)
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(300.dp)
+                .border(
+                    width = 2.dp,
+                    color = Color(0x4DEF4444), // red-500/30
+                    shape = CircleShape
+                )
+                .alpha(
+                    rememberInfiniteTransition().animateFloat(
+                        initialValue = 0.3f,
+                        targetValue = 0.7f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(2000),
+                            repeatMode = RepeatMode.Reverse
+                        )
+                    ).value
+                )
+        )
+
+        // Player markers
+        // 1. Me (center)
+        Box(
+            modifier = Modifier.align(Alignment.Center),
+            contentAlignment = Alignment.Center
+        ) {
+            val markerColor = if (role == PlayerRole.THIEF) {
+                Color(0xFFDC2626) // red-600
+            } else {
+                Color(0xFF3B82F6) // blue-500
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(markerColor, CircleShape)
+                    .border(4.dp, Color.White, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "ME",
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+            }
+        }
+
+        // 2. Teammate (simulated position)
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .offset(x = 80.dp, y = (-60).dp)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val markerColor = if (role == PlayerRole.THIEF) {
+                    Color(0xFFDC2626)
+                } else {
+                    Color(0xFF3B82F6)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .alpha(0.8f)
+                        .background(markerColor, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(Color.White, CircleShape)
+                    )
+                }
+
+                Text(
+                    text = "AGENT_K",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .background(Color(0x80000000), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        // Game message alert (toast)
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 16.dp)
+                .fillMaxWidth(0.9f)
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xE6DC2626) // red-600/90
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "🚨",
+                        fontSize = 20.sp
+                    )
+                    Text(
+                        text = "[ALERT] 도둑 'Hacker_9'가 반경을 이탈하여 탈락했습니다!",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionFooter(
+    role: PlayerRole,
+    gamePhase: String,
+    remainingThieves: Int,
+    totalThieves: Int,
+    nearbyThieves: List<PlayerLocation>,
+    onRequestCatch: (thiefUserId: String, policeUserId: String, policeNickname: String) -> Unit
+) {
+    var showCatchDialog by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF020617)) // slate-950
+            .border(1.dp, Color(0xFF0F172A), RoundedCornerShape(0.dp))
+            .padding(32.dp)
+    ) {
+        if (role == PlayerRole.POLICE) {
+            // Police UI: Capture button
+            val isEscapePhase = gamePhase == "ESCAPE"
+            val canCatch = nearbyThieves.isNotEmpty() && !isEscapePhase
+
+            Button(
+                onClick = {
+                    if (canCatch) {
+                        showCatchDialog = true
+                    }
+                },
+                enabled = canCatch,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(80.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (canCatch) Color(0xFF2563EB) else Color(0xFF334155),
+                    disabledContainerColor = Color(0xFF1E293B)
+                )
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = when {
+                            isEscapePhase -> "ESCAPE PHASE"
+                            nearbyThieves.isNotEmpty() -> "I GOT 'EM!"
+                            else -> "NO TARGETS"
+                        },
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Black,
+                        fontStyle = FontStyle.Italic,
+                        letterSpacing = (-1).sp,
+                        color = if (canCatch) Color.White else Color(0xFF64748B)
+                    )
+                    Text(
+                        text = when {
+                            isEscapePhase -> "도둑이 도망치는 중..."
+                            nearbyThieves.isNotEmpty() -> "도둑 ${nearbyThieves.size}명 감지됨"
+                            else -> "5m 이내에 도둑이 없습니다"
+                        },
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.5.sp,
+                        color = if (canCatch) Color.White.copy(alpha = 0.7f) else Color(0xFF475569),
+                        modifier = Modifier.alpha(0.7f)
+                    )
+                }
+            }
+
+            // Catch target selection dialog
+            if (showCatchDialog) {
+                CatchTargetDialog(
+                    nearbyThieves = nearbyThieves,
+                    onSelectThief = { thiefUserId ->
+                        onRequestCatch(thiefUserId, "POLICE_ME", "Me") // TODO: Get actual police ID and nickname
+                        showCatchDialog = false
+                    },
+                    onDismiss = { showCatchDialog = false }
+                )
+            }
+        } else {
+            // Thief UI: Survival status
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Remaining Thieves
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFF0F172A) // slate-900
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0x4D7F1D1D)) // red-900/30
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Text(
+                                text = "REMAINING THIEVES",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 1.sp,
+                                color = Color(0xFF64748B)
+                            )
+                            Text(
+                                text = "$remainingThieves / $totalThieves",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFFEF4444) // red-500
+                            )
+                        }
+                    }
+
+                    // Status
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFF0F172A)
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0x4D1E3A8A)) // blue-900/30
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Text(
+                                text = "STATUS",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 1.sp,
+                                color = Color(0xFF64748B)
+                            )
+                            Text(
+                                text = "EVADING",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                fontStyle = FontStyle.Italic,
+                                color = Color(0xFF22C55E) // green-500
+                            )
+                        }
+                    }
+                }
+
+                // Phase message
+                when (gamePhase) {
+                    "ESCAPE" -> {
+                        Text(
+                            text = "※ 도망 시간: 5분간 숨을 수 있습니다",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF22C55E), // green-500
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(
+                                    rememberInfiniteTransition().animateFloat(
+                                        initialValue = 0.5f,
+                                        targetValue = 1f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(1000),
+                                            repeatMode = RepeatMode.Reverse
+                                        )
+                                    ).value
+                                )
+                        )
+                    }
+                    "CHASE" -> {
+                        Text(
+                            text = "⚠️ 추격 시작! 경찰이 당신을 쫓고 있습니다!",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFEF4444), // red-500
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(
+                                    rememberInfiniteTransition().animateFloat(
+                                        initialValue = 0.5f,
+                                        targetValue = 1f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(500),
+                                            repeatMode = RepeatMode.Reverse
+                                        )
+                                    ).value
+                                )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

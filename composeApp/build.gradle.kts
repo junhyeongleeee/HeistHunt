@@ -1,6 +1,7 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -8,6 +9,14 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinxSerialization)
+    alias(libs.plugins.googleServices)
+}
+
+// Load local.properties
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(localPropertiesFile.inputStream())
 }
 
 kotlin {
@@ -39,6 +48,34 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.ktor.client.okhttp)
+
+            // Firebase
+            implementation(platform(libs.firebase.bom.get()))
+            implementation(libs.firebase.auth)
+            implementation(libs.firebase.firestore)
+            implementation(libs.firebase.realtime.database)
+            implementation(libs.firebase.storage)
+            implementation(libs.firebase.messaging)
+            implementation(libs.firebase.analytics)
+
+            // Google Sign-In with Credential Manager
+            implementation(libs.credentials)
+            implementation(libs.credentials.play.services.auth)
+            implementation(libs.googleid)
+
+            // Camera & QR Scanning
+            implementation(libs.camerax.core)
+            implementation(libs.camerax.camera2)
+            implementation(libs.camerax.lifecycle)
+            implementation(libs.camerax.view)
+            implementation(libs.mlkit.barcode.scanning)
+
+            // Location Services
+            implementation("com.google.android.gms:play-services-location:21.1.0")
+
+            // Google Maps
+            implementation("com.google.android.gms:play-services-maps:18.2.0")
+            implementation("com.google.maps.android:maps-compose:4.3.3")
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -51,9 +88,14 @@ kotlin {
             implementation(libs.androidx.lifecycle.runtime.compose)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.kotlinx.datetime)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
+            implementation(libs.qrose)
+
+            // Shared module
+            implementation(project(":shared"))
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
@@ -75,6 +117,10 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "1.0"
+
+        // Add Maps API Key to manifest placeholders
+        val mapsApiKey = localProperties.getProperty("MAPS_API_KEY") ?: "YOUR_GOOGLE_MAPS_API_KEY_HERE"
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
     packaging {
         resources {

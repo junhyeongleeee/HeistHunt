@@ -38,6 +38,14 @@ iosApp/*.moved-aside
 iosApp/**/xcshareddata/
 iosApp/**/xcuserdata/
 
+# Firebase
+google-services.json
+GoogleService-Info.plist
+firebase_options.dart
+firebase_options.dart.js
+firebase-debug.log
+.firebase/
+
 # Misc
 *.log
 *.tmp
