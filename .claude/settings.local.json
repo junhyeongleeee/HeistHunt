@@ -72,7 +72,8 @@
       "Bash(timeout 30 tail:*)",
       "Bash(timeout 60 tail:*)",
       "Bash(unzip:*)",
-      "Bash(strings:*)"
+      "Bash(strings:*)",
+      "Bash(git pull:*)"
     ]
   }
 }
