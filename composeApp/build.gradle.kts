@@ -10,6 +10,7 @@ plugins {
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinxSerialization)
     alias(libs.plugins.googleServices)
+    kotlin("native.cocoapods")
 }
 
 // Load local.properties
@@ -36,6 +37,20 @@ kotlin {
             baseName = "ComposeApp"
             isStatic = true
         }
+    }
+
+    cocoapods {
+        summary = "HeistHunt iOS App"
+        homepage = "https://github.com/heisthunt"
+        version = "1.0"
+        ios.deploymentTarget = "15.0"
+        framework {
+            baseName = "ComposeApp"
+            isStatic = true
+        }
+
+        // Note: GoogleSignIn is added via Podfile directly
+        // We use Swift bridge + Obj-C runtime instead of cinterop to avoid Xcode 26.2 compatibility issues
     }
 
     jvm("desktop")

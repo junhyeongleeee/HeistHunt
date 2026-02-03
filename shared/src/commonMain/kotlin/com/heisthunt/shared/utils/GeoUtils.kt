@@ -6,6 +6,11 @@ object GeoUtils {
     private const val EARTH_RADIUS_METERS = 6371000.0 // 지구 반경 (미터)
 
     /**
+     * 도(degree)를 라디안(radian)으로 변환
+     */
+    private fun Double.toRadians(): Double = this * PI / 180.0
+
+    /**
      * 두 위치 간의 거리를 미터 단위로 계산 (Haversine formula)
      */
     fun calculateDistance(
@@ -14,12 +19,12 @@ object GeoUtils {
         lat2: Double,
         lon2: Double
     ): Double {
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
+        val dLat = (lat2 - lat1).toRadians()
+        val dLon = (lon2 - lon1).toRadians()
 
         val a = sin(dLat / 2).pow(2) +
-                cos(Math.toRadians(lat1)) *
-                cos(Math.toRadians(lat2)) *
+                cos(lat1.toRadians()) *
+                cos(lat2.toRadians()) *
                 sin(dLon / 2).pow(2)
 
         val c = 2 * atan2(sqrt(a), sqrt(1 - a))

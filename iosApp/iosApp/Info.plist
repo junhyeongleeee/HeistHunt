@@ -39,5 +39,21 @@
     </array>
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
+
+    <!-- Google Sign-In Configuration -->
+    <key>GIDClientID</key>
+    <string>121910262869-946eig0rmpor8dkd2usckgoufaa29dpd.apps.googleusercontent.com</string>
+
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>com.googleusercontent.apps.121910262869-946eig0rmpor8dkd2usckgoufaa29dpd</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

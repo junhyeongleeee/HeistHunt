@@ -2,6 +2,11 @@ import SwiftUI
 import ComposeApp
 
 struct ContentView: View {
+    init() {
+        // Initialize GoogleSignInBridge early to register Kotlin callbacks
+        _ = GoogleSignInBridge.shared
+    }
+
     var body: some View {
         ComposeView()
             .ignoresSafeArea(.all)
