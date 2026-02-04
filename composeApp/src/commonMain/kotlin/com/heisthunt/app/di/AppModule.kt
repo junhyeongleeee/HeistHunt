@@ -3,25 +3,38 @@ package com.heisthunt.app.di
 import com.heisthunt.app.location.LocationService
 import com.heisthunt.app.network.ApiClient
 import com.heisthunt.app.network.GameWebSocketClient
+import com.heisthunt.app.network.TokenStorage
 import com.heisthunt.app.repository.AuthRepository
 import com.heisthunt.app.repository.GameRepository
 import com.heisthunt.app.repository.RoomRepository
+import com.heisthunt.app.storage.SecureStorage
 import com.heisthunt.app.viewmodel.AuthViewModel
 import com.heisthunt.app.viewmodel.GameViewModel
 import com.heisthunt.app.viewmodel.RoomViewModel
 import com.heisthunt.shared.models.PlayerRole
 
 object AppModule {
+    lateinit var secureStorage: SecureStorage
+    lateinit var tokenStorage: TokenStorage
+
+    fun initialize(secureStorage: SecureStorage) {
+        this.secureStorage = secureStorage
+        this.tokenStorage = TokenStorage(secureStorage)
+        // Load user from storage on initialization
+        this.tokenStorage.loadUser()
+    }
+
     // API Client - 싱글톤
     private val apiClient: ApiClient by lazy {
         ApiClient(
-            baseUrl = getBaseUrl()
+            baseUrl = getBaseUrl(),
+            tokenStorage = tokenStorage
         )
     }
 
     // Repositories
     val authRepository: AuthRepository by lazy {
-        AuthRepository(apiClient)
+        AuthRepository(apiClient, tokenStorage)
     }
 
     val roomRepository: RoomRepository by lazy {
@@ -34,13 +47,13 @@ object AppModule {
 
     // ViewModels
     fun provideAuthViewModel(): AuthViewModel {
-        return AuthViewModel(authRepository)
+        return AuthViewModel(authRepository, tokenStorage)
     }
 
     fun provideRoomViewModel(): RoomViewModel {
         return RoomViewModel(
             roomRepository = roomRepository,
-            baseUrl = "192.168.1.145:8080" // WebSocket uses host:port format without protocol
+            baseUrl = getWebSocketBaseUrl() // WebSocket uses host:port format without protocol
         )
     }
 
@@ -53,7 +66,7 @@ object AppModule {
         totalDurationSeconds: Long
     ): GameViewModel {
         val wsClient = GameWebSocketClient(
-            baseUrl = "192.168.1.145:8080",
+            baseUrl = getWebSocketBaseUrl(),
             getAccessToken = { apiClient.getAccessToken() }
         )
 
@@ -73,6 +86,13 @@ object AppModule {
         // Android Emulator uses 10.0.2.2 to access host localhost
         // iOS Simulator uses localhost directly
         // For physical devices, use your computer's IP address
-        return "http://192.168.1.145:8080"
+        return getPlatformBaseUrl()
+    }
+
+    private fun getWebSocketBaseUrl(): String {
+        // WebSocket uses host:port format without protocol
+        return getPlatformBaseUrl().removePrefix("http://").removePrefix("https://")
     }
 }
+
+expect fun getPlatformBaseUrl(): String
