@@ -25,12 +25,73 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.*
 
 fun Route.gameRoutes() {
     route("/games") {
         authenticate("auth-jwt") {
+            // Get user's active game
+            get("/my-active-game") {
+                val principal = call.principal<JWTPrincipal>()
+                val userId = principal?.payload?.getClaim("userId")?.asString()
+                    ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                val activeGame = transaction {
+                    // Find active game for this user
+                    val game = (Games innerJoin GamePlayers innerJoin Rooms)
+                        .selectAll()
+                        .where {
+                            (GamePlayers.userId eq userId) and
+                            (Games.status eq "IN_PROGRESS")
+                        }
+                        .orderBy(Games.startedAt, SortOrder.DESC)
+                        .limit(1)
+                        .singleOrNull()
+
+                    if (game == null) {
+                        return@transaction null
+                    }
+
+                    val gameId = game[Games.id]
+                    val roomId = game[Games.roomId]
+                    val playerRole = PlayerRole.valueOf(game[GamePlayers.role])
+                    val startTime = game[Games.startedAt]
+                    val phase = game[Games.phase]
+
+                    // Get room settings
+                    val room = Rooms.selectAll().where { Rooms.id eq roomId }.singleOrNull()
+                    val gameDurationMinutes = room?.get(Rooms.gameDurationMinutes) ?: 30
+
+                    com.heisthunt.shared.dto.ActiveGameResponse(
+                        gameId = gameId,
+                        roomId = roomId,
+                        roomName = room?.get(Rooms.name) ?: "",
+                        myRole = playerRole,
+                        startTime = startTime,
+                        escapeDurationSeconds = 300L, // 5 minutes
+                        totalDurationSeconds = gameDurationMinutes * 60L,
+                        phase = phase
+                    )
+                }
+
+                if (activeGame != null) {
+                    call.respond(HttpStatusCode.OK, com.heisthunt.shared.dto.ApiResponse(success = true, data = activeGame))
+                } else {
+                    call.respond(
+                        HttpStatusCode.NotFound,
+                        com.heisthunt.shared.dto.ApiResponse<Unit>(
+                            success = false,
+                            error = com.heisthunt.shared.dto.ErrorResponse(
+                                com.heisthunt.shared.dto.ErrorCodes.GAME_NOT_FOUND,
+                                "No active game"
+                            )
+                        )
+                    )
+                }
+            }
+
             // Start game
             post("/{roomId}/start") {
                 val principal = call.principal<JWTPrincipal>()
@@ -66,6 +127,12 @@ fun Route.gameRoutes() {
                         .filter { it[RoomParticipants.selectedRole] == PlayerRole.POLICE.name }
                         .map { it[RoomParticipants.userId] }
 
+                    println("🎭 Role Assignment Debug:")
+                    participants.forEach { p ->
+                        println("  User ${p[RoomParticipants.userId]}: selectedRole=${p[RoomParticipants.selectedRole]}")
+                    }
+                    println("  Police IDs: $policeIds")
+
                     // Update room status
                     val now = Clock.System.now()
                     Rooms.update({ Rooms.id eq roomId }) {
@@ -76,6 +143,7 @@ fun Route.gameRoutes() {
                     // Update participant roles
                     participants.forEach { p ->
                         val role = if (policeIds.contains(p[RoomParticipants.userId])) PlayerRole.POLICE else PlayerRole.THIEF
+                        println("  ✅ Assigning role ${role.name} to user ${p[RoomParticipants.userId]}")
                         RoomParticipants.update({
                             (RoomParticipants.roomId eq roomId) and (RoomParticipants.userId eq p[RoomParticipants.userId])
                         }) {
@@ -183,6 +251,54 @@ fun Route.gameRoutes() {
                         ApiResponse<Unit>(success = false, error = ErrorResponse("NOT_ALL_READY", "Not all players are ready"))
                     )
                 }
+            }
+
+            // Leave game
+            post("/{gameId}/leave") {
+                val principal = call.principal<JWTPrincipal>()
+                val userId = principal?.payload?.getClaim("userId")?.asString()
+                    ?: return@post call.respond(HttpStatusCode.Unauthorized)
+
+                val gameId = call.parameters["gameId"] ?: return@post call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiResponse<Unit>(success = false, error = ErrorResponse(ErrorCodes.INTERNAL_ERROR, "Game ID required"))
+                )
+
+                println("🚪 User $userId leaving game $gameId")
+
+                transaction {
+                    // Remove player from game
+                    GamePlayers.deleteWhere {
+                        (GamePlayers.gameId eq gameId) and (GamePlayers.userId eq userId)
+                    }
+
+                    // Check remaining players
+                    val remainingPlayers = GamePlayers.selectAll()
+                        .where { GamePlayers.gameId eq gameId }
+                        .count()
+
+                    println("   Remaining players: $remainingPlayers")
+
+                    // If no players left, end the game
+                    if (remainingPlayers == 0L) {
+                        Games.update({ Games.id eq gameId }) {
+                            it[status] = "COMPLETED"
+                            it[endedAt] = Clock.System.now()
+                        }
+                        println("   Game ended - no players remaining")
+                    }
+                }
+
+                // Disconnect from WebSocket
+                GameConnectionManager.removeConnection(gameId, userId)
+
+                // Notify other players
+                GameConnectionManager.broadcastMessage(
+                    gameId,
+                    WebSocketMessage.PlayerLeft(userId)
+                )
+
+                call.respond(ApiResponse(success = true, data = "Left game"))
             }
 
             // Get game status

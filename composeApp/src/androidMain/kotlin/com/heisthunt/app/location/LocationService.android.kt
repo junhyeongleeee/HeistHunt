@@ -20,6 +20,22 @@ actual class LocationService(private val context: Context) {
         onLocationUpdate: (Location) -> Unit,
         onError: (String) -> Unit
     ) {
+        // Use mock location if enabled
+        if (MockLocationService.isEnabled) {
+            println("🧪 Using MOCK location service")
+            // Simulate location updates with mock data
+            val handler = android.os.Handler(Looper.getMainLooper())
+            val runnable = object : Runnable {
+                override fun run() {
+                    val mockLocation = MockLocationService.getCurrentLocation()
+                    onLocationUpdate(mockLocation)
+                    handler.postDelayed(this, intervalMillis)
+                }
+            }
+            handler.post(runnable)
+            return
+        }
+
         if (!isLocationEnabled()) {
             onError("Location services are disabled. Please enable GPS.")
             return
@@ -81,6 +97,12 @@ actual class LocationService(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     actual suspend fun getCurrentLocation(): Result<Location> {
+        // Use mock location if enabled
+        if (MockLocationService.isEnabled) {
+            println("🧪 Returning MOCK location")
+            return Result.success(MockLocationService.getCurrentLocation())
+        }
+
         return try {
             val task = fusedLocationClient.getCurrentLocation(
                 Priority.PRIORITY_HIGH_ACCURACY,

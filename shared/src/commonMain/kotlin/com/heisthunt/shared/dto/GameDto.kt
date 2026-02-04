@@ -54,6 +54,18 @@ data class PlayerResult(
     val isCaught: Boolean
 )
 
+@Serializable
+data class ActiveGameResponse(
+    val gameId: String,
+    val roomId: String,
+    val roomName: String,
+    val myRole: PlayerRole,
+    val startTime: Instant,
+    val escapeDurationSeconds: Long,
+    val totalDurationSeconds: Long,
+    val phase: String
+)
+
 // WebSocket Messages
 @Serializable
 sealed class WebSocketMessage {
@@ -95,6 +107,9 @@ sealed class WebSocketMessage {
         val phase: com.heisthunt.shared.models.GamePhase,
         val message: String
     ) : WebSocketMessage()
+
+    @Serializable
+    data class PlayerLeft(val userId: String) : WebSocketMessage()
 
     @Serializable
     data class Error(val message: String) : WebSocketMessage()

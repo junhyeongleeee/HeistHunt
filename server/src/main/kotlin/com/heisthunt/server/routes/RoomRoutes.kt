@@ -354,7 +354,7 @@ private fun getRoomById(roomId: String): Room? {
 
 private fun generateRoomCode(): String {
     val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    return (1..6).map { chars.random() }.joinToString("")
+    return (1..4).map { chars.random() }.joinToString("")
 }
 
 private sealed class JoinResult {

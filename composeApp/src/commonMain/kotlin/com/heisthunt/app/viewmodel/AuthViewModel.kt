@@ -2,6 +2,7 @@ package com.heisthunt.app.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.heisthunt.app.network.TokenStorage
 import com.heisthunt.app.repository.AuthRepository
 import com.heisthunt.shared.models.User
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,19 +17,34 @@ data class AuthUiState(
     val isLoggedIn: Boolean = false
 )
 
-class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
+class AuthViewModel(
+    private val authRepository: AuthRepository,
+    private val tokenStorage: TokenStorage
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
     init {
-        checkLoginStatus()
+        checkAutoLogin()
     }
 
-    private fun checkLoginStatus() {
-        val isLoggedIn = authRepository.isLoggedIn()
-        val user = authRepository.getCurrentUser()
-        _uiState.value = AuthUiState(isLoggedIn = isLoggedIn, user = user)
+    private fun checkAutoLogin() {
+        viewModelScope.launch {
+            if (tokenStorage.isLoggedIn) {
+                // Try to validate token
+                val result = authRepository.validateToken()
+                if (result.isSuccess) {
+                    _uiState.value = AuthUiState(
+                        isLoggedIn = true,
+                        user = authRepository.getCurrentUser()
+                    )
+                } else {
+                    // Token expired, logout
+                    logout()
+                }
+            }
+        }
     }
 
     fun login(email: String, password: String) {

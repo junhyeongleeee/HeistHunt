@@ -40,6 +40,19 @@
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
 
+    <!-- Location Permission -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>HeistHunt needs your location to track your position during the game.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>HeistHunt needs your location to track your position during the game.</string>
+
+    <!-- App Transport Security -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+
     <!-- Google Sign-In Configuration -->
     <key>GIDClientID</key>
     <string>121910262869-946eig0rmpor8dkd2usckgoufaa29dpd.apps.googleusercontent.com</string>

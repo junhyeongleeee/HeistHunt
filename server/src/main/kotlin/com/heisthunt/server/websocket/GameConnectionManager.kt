@@ -1,5 +1,6 @@
 package com.heisthunt.server.websocket
 
+import com.heisthunt.server.database.Games
 import com.heisthunt.shared.dto.WebSocketMessage
 import com.heisthunt.shared.models.Location
 import com.heisthunt.shared.models.PlayerLocation
@@ -8,6 +9,8 @@ import io.ktor.websocket.*
 import io.ktor.server.websocket.WebSocketServerSession
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.concurrent.ConcurrentHashMap
 
 object GameConnectionManager {
@@ -42,33 +45,48 @@ object GameConnectionManager {
 
     fun updateLocation(gameId: String, userId: String, location: Location) {
         val role = playerRoles[gameId]?.get(userId) ?: return
+        val now = kotlinx.datetime.Clock.System.now()
         val playerLocation = PlayerLocation(
             userId = userId,
             location = location,
-            role = role
+            role = role,
+            lastUpdateTimestamp = now
         )
         lastKnownLocations.getOrPut(gameId) { ConcurrentHashMap() }[userId] = playerLocation
-        println("Location updated: gameId=$gameId, userId=$userId, lat=${location.latitude}, lon=${location.longitude}")
+        println("Location updated: gameId=$gameId, userId=$userId, lat=${location.latitude}, lon=${location.longitude}, timestamp=$now")
     }
 
     suspend fun broadcastLocations(gameId: String, senderId: String) {
         val senderRole = playerRoles[gameId]?.get(senderId) ?: return
         val allLocations = lastKnownLocations[gameId]?.values?.toList() ?: emptyList()
 
+        // Get current game phase from database
+        val currentPhase = transaction {
+            Games.selectAll().where { Games.id eq gameId }
+                .singleOrNull()
+                ?.get(Games.phase)
+        } ?: "ESCAPE"
+
         connections[gameId]?.forEach { (receiverId, session) ->
             try {
                 val receiverRole = playerRoles[gameId]?.get(receiverId) ?: return@forEach
 
-                // Filter locations based on receiver's role
-                val visibleLocations = when (receiverRole) {
-                    PlayerRole.POLICE -> allLocations // Police can see everyone
-                    PlayerRole.THIEF -> allLocations.filter { it.role == PlayerRole.THIEF } // Thieves only see other thieves
+                // Filter locations based on receiver's role and game phase
+                val visibleLocations = if (currentPhase == "ESCAPE") {
+                    // ESCAPE phase: Everyone can see everyone
+                    allLocations
+                } else {
+                    // CHASE phase: Use normal rules
+                    when (receiverRole) {
+                        PlayerRole.POLICE -> allLocations // Police can see everyone
+                        PlayerRole.THIEF -> allLocations.filter { it.role == PlayerRole.THIEF } // Thieves only see other thieves
+                    }
                 }
 
                 val message = WebSocketMessage.PlayerLocations(visibleLocations)
                 val json = Json.encodeToString(message)
                 session.send(Frame.Text(json))
-                println("Broadcasted ${visibleLocations.size} locations to user $receiverId (role: $receiverRole)")
+                println("Broadcasted ${visibleLocations.size} locations to user $receiverId (role: $receiverRole, phase: $currentPhase)")
             } catch (e: Exception) {
                 println("Error broadcasting to user $receiverId: ${e.message}")
                 // Remove dead connection

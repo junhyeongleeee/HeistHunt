@@ -59,25 +59,31 @@ class RoomViewModel(
     }
 
     private fun handleWebSocketEvent(event: RoomEvent) {
-        println("Handling WebSocket event: ${event::class.simpleName}")
+        println("📥 [RoomViewModel] Handling WebSocket event: ${event::class.simpleName}")
 
         // Handle GameStarted event first (before room check)
         if (event is RoomEvent.GameStarted) {
-            println("🎮 Game started with ID: ${event.gameId}")
+            println("🎮 [RoomViewModel] *** GAME STARTED *** with ID: ${event.gameId}")
+            println("🎮 [RoomViewModel] startTime: ${event.startTime}")
+            println("🎮 [RoomViewModel] escapeDurationSeconds: ${event.escapeDurationSeconds}")
+            println("🎮 [RoomViewModel] totalDurationSeconds: ${event.totalDurationSeconds}")
             viewModelScope.launch {
                 val roomId = _detailState.value.room?.id
+                println("🎮 [RoomViewModel] Current roomId: $roomId")
                 if (roomId != null) {
-                    println("📡 Reloading room to get assigned roles...")
+                    println("📡 [RoomViewModel] Reloading room to get assigned roles...")
                     // Reload room to get updated participant roles
                     roomRepository.getRoom(roomId)
                         .onSuccess { updatedRoom ->
-                            println("✅ Room reloaded successfully")
+                            println("✅ [RoomViewModel] Room reloaded successfully")
+                            println("✅ [RoomViewModel] Participants count: ${updatedRoom.participants.size}")
                             // Find current user's role from participants
-                            val currentUserId = com.heisthunt.app.network.TokenStorage.userId
+                            val currentUserId = com.heisthunt.app.di.AppModule.tokenStorage.userId
                             val myParticipant = updatedRoom.participants.find { it.userId == currentUserId }
                             val myRole = myParticipant?.role
 
-                            println("🎭 Current userId: $currentUserId, My assigned role: $myRole")
+                            println("🎭 [RoomViewModel] Current userId: $currentUserId")
+                            println("🎭 [RoomViewModel] My assigned role: $myRole")
 
                             _detailState.value = _detailState.value.copy(
                                 room = updatedRoom,
@@ -88,10 +94,16 @@ class RoomViewModel(
                                 escapeDurationSeconds = event.escapeDurationSeconds,
                                 totalDurationSeconds = event.totalDurationSeconds
                             )
+                            println("🚀 [RoomViewModel] Navigation state set!")
+                            println("🚀 [RoomViewModel] shouldNavigateToGame: true")
+                            println("🚀 [RoomViewModel] gameId: ${event.gameId}")
+                            println("🚀 [RoomViewModel] myRole: $myRole")
                         }
                         .onFailure { exception ->
-                            println("❌ Failed to reload room: ${exception.message}")
+                            println("❌ [RoomViewModel] Failed to reload room: ${exception.message}")
                         }
+                } else {
+                    println("❌ [RoomViewModel] roomId is null, cannot reload room!")
                 }
             }
             return
@@ -232,6 +244,10 @@ class RoomViewModel(
         }
     }
 
+    fun joinRoomByCode(code: String) {
+        joinRoom(code, password = null)
+    }
+
     fun loadRoom(roomId: String) {
         viewModelScope.launch {
             _detailState.value = _detailState.value.copy(isLoading = true, error = null)
@@ -295,6 +311,23 @@ class RoomViewModel(
     fun clearError() {
         _listState.value = _listState.value.copy(error = null)
         _detailState.value = _detailState.value.copy(error = null)
+    }
+
+    fun restoreGameState(
+        gameId: String,
+        myRole: PlayerRole,
+        gameStartTime: kotlinx.datetime.Instant,
+        escapeDurationSeconds: Long,
+        totalDurationSeconds: Long
+    ) {
+        _detailState.value = _detailState.value.copy(
+            gameId = gameId,
+            myRole = myRole,
+            gameStartTime = gameStartTime,
+            escapeDurationSeconds = escapeDurationSeconds,
+            totalDurationSeconds = totalDurationSeconds,
+            shouldNavigateToGame = true
+        )
     }
 
     fun clearRoom() {

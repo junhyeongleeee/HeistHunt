@@ -26,6 +26,7 @@ data class GameUiState(
     val myRole: PlayerRole,
     val gameStatus: GameStateResponse? = null,
     val playerLocations: List<PlayerLocation> = emptyList(),
+    val disconnectedPlayerIds: Set<String> = emptySet(),
     val myLocation: Location? = null,
     val isLocationTracking: Boolean = false,
     val error: String? = null,
@@ -126,8 +127,19 @@ class GameViewModel(
         when (event) {
             is WebSocketMessage.PlayerLocations -> {
                 println("Received ${event.locations.size} player locations")
+                val now = kotlinx.datetime.Clock.System.now()
+
+                // Identify disconnected players (no update for 15 seconds)
+                val disconnected = event.locations
+                    .filter { (now - it.lastUpdateTimestamp).inWholeSeconds > 15 }
+                    .map { it.userId }
+                    .toSet()
+
                 _uiState.update {
-                    it.copy(playerLocations = event.locations)
+                    it.copy(
+                        playerLocations = event.locations,
+                        disconnectedPlayerIds = disconnected
+                    )
                 }
                 // Calculate nearby thieves for police
                 updateNearbyThieves()
@@ -377,6 +389,24 @@ class GameViewModel(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    fun leaveGame() {
+        println("🚪 Leaving game: $gameId")
+        stopLocationTracking()
+        viewModelScope.launch {
+            // Call server API to leave game
+            gameRepository.leaveGame(gameId)
+                .onSuccess {
+                    println("✅ Successfully left game")
+                }
+                .onFailure { error ->
+                    println("❌ Failed to leave game: ${error.message}")
+                }
+
+            // Disconnect WebSocket
+            wsClient.disconnect()
+        }
     }
 
     override fun onCleared() {

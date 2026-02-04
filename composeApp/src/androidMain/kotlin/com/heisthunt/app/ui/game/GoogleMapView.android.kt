@@ -28,6 +28,7 @@ actual fun GameMapView(
     myRole: PlayerRole,
     safeRadiusMeters: Double,
     gameCenterLocation: Location?,
+    disconnectedPlayerIds: Set<String>,
     modifier: Modifier
 ) {
     // Default to a location if none provided (will be overridden when real location arrives)
@@ -121,9 +122,15 @@ actual fun GameMapView(
                     return@forEach
                 }
 
-                val markerColor = when (playerLocation.role) {
-                    PlayerRole.POLICE -> Color(0xFF3B82F6) // blue-500
-                    PlayerRole.THIEF -> Color(0xFFDC2626) // red-600
+                val isDisconnected = disconnectedPlayerIds.contains(playerLocation.userId)
+
+                val markerColor = if (isDisconnected) {
+                    Color(0xFF64748B) // slate-500 (gray for disconnected)
+                } else {
+                    when (playerLocation.role) {
+                        PlayerRole.POLICE -> Color(0xFF3B82F6) // blue-500
+                        PlayerRole.THIEF -> Color(0xFFDC2626) // red-600
+                    }
                 }
 
                 Marker(
@@ -133,9 +140,10 @@ actual fun GameMapView(
                             playerLocation.location.longitude
                         )
                     ),
-                    title = playerLocation.userId.take(8),
+                    title = playerLocation.userId.take(8) + if (isDisconnected) " (연결 끊김)" else "",
                     snippet = playerLocation.role.name,
-                    icon = createCustomMarkerIcon(markerColor, isMe = false)
+                    icon = createCustomMarkerIcon(markerColor, isMe = false),
+                    alpha = if (isDisconnected) 0.5f else 1.0f
                 )
             }
         }

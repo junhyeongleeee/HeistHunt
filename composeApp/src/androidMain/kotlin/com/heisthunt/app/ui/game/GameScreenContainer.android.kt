@@ -78,9 +78,12 @@ actual fun GameScreenContainer(
     val myNickname = "Player" // Placeholder
 
     // Render the actual game screen
+    // Use uiState.myRole if available (more reliable), fallback to parameter myRole
+    val actualRole = uiState.myRole ?: myRole
+
     GameScreen(
         gameId = gameId,
-        myRole = myRole,
+        myRole = actualRole,
         room = room,
         onBack = onBack,
         uiState = uiState,
@@ -102,6 +105,9 @@ actual fun GameScreenContainer(
         },
         onDismissCatchRequest = {
             viewModel.dismissCatchRequest()
+        },
+        onLeaveGame = {
+            viewModel.leaveGame()
         }
     )
 }

@@ -6,14 +6,17 @@ import com.heisthunt.shared.dto.LoginRequest
 import com.heisthunt.shared.dto.RegisterRequest
 import com.heisthunt.shared.models.User
 
-class AuthRepository(private val apiClient: ApiClient) {
+class AuthRepository(
+    private val apiClient: ApiClient,
+    private val tokenStorage: TokenStorage
+) {
 
     suspend fun register(email: String, password: String, nickname: String): Result<User> {
         return try {
             val response = apiClient.register(RegisterRequest(email, password, nickname))
             val authData = response.data
             if (response.success && authData != null) {
-                TokenStorage.saveTokens(authData.accessToken, authData.refreshToken, authData.user)
+                tokenStorage.saveTokens(authData.accessToken, authData.refreshToken, authData.user)
                 apiClient.setTokens(authData.accessToken, authData.refreshToken)
                 Result.success(authData.user)
             } else {
@@ -29,7 +32,7 @@ class AuthRepository(private val apiClient: ApiClient) {
             val response = apiClient.login(LoginRequest(email, password))
             val authData = response.data
             if (response.success && authData != null) {
-                TokenStorage.saveTokens(authData.accessToken, authData.refreshToken, authData.user)
+                tokenStorage.saveTokens(authData.accessToken, authData.refreshToken, authData.user)
                 apiClient.setTokens(authData.accessToken, authData.refreshToken)
                 Result.success(authData.user)
             } else {
@@ -45,7 +48,7 @@ class AuthRepository(private val apiClient: ApiClient) {
             val response = apiClient.googleLogin(email)
             val authData = response.data
             if (response.success && authData != null) {
-                TokenStorage.saveTokens(authData.accessToken, authData.refreshToken, authData.user)
+                tokenStorage.saveTokens(authData.accessToken, authData.refreshToken, authData.user)
                 apiClient.setTokens(authData.accessToken, authData.refreshToken)
                 Result.success(authData.user)
             } else {
@@ -61,7 +64,7 @@ class AuthRepository(private val apiClient: ApiClient) {
             val response = apiClient.refreshTokens()
             val tokenData = response.data
             if (response.success && tokenData != null) {
-                TokenStorage.updateTokens(tokenData.accessToken, tokenData.refreshToken)
+                tokenStorage.updateTokens(tokenData.accessToken, tokenData.refreshToken)
                 apiClient.setTokens(tokenData.accessToken, tokenData.refreshToken)
                 Result.success(Unit)
             } else {
@@ -72,12 +75,25 @@ class AuthRepository(private val apiClient: ApiClient) {
         }
     }
 
+    suspend fun validateToken(): Result<Unit> {
+        return try {
+            val response = apiClient.getMe()
+            if (response.success) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("Token validation failed"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun logout() {
-        TokenStorage.clear()
+        tokenStorage.clear()
         apiClient.clearTokens()
     }
 
-    fun isLoggedIn(): Boolean = TokenStorage.isLoggedIn
+    fun isLoggedIn(): Boolean = tokenStorage.isLoggedIn
 
-    fun getCurrentUser(): User? = TokenStorage.currentUser.value
+    fun getCurrentUser(): User? = tokenStorage.currentUser.value
 }

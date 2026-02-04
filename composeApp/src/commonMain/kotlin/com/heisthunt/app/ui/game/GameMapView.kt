@@ -13,5 +13,6 @@ expect fun GameMapView(
     myRole: PlayerRole,
     safeRadiusMeters: Double = 500.0,
     gameCenterLocation: Location? = null,
+    disconnectedPlayerIds: Set<String> = emptySet(),
     modifier: Modifier = Modifier
 )

@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.heisthunt.app.network.TokenStorage
 import com.heisthunt.app.ui.components.QRCodeDisplay
 import com.heisthunt.app.viewmodel.RoomViewModel
@@ -55,7 +56,10 @@ fun OperationScreen(
 
     // Navigate to game screen when game starts
     LaunchedEffect(roomDetailState.shouldNavigateToGame) {
+        println("🧭 [OperationScreen] shouldNavigateToGame changed: ${roomDetailState.shouldNavigateToGame}")
+        println("🧭 [OperationScreen] gameId: ${roomDetailState.gameId}, myRole: ${roomDetailState.myRole}")
         if (roomDetailState.shouldNavigateToGame) {
+            println("🧭 [OperationScreen] Navigating to GAME view!")
             currentView = OperationView.GAME
             roomViewModel.resetGameNavigationState()
         }
@@ -76,7 +80,11 @@ fun OperationScreen(
                 onScanQR = { currentView = OperationView.QR_SCANNER },
                 onNavigateToDebug = onNavigateToDebug,
                 onLogout = { authViewModel.logout() },
-                onClearError = { roomViewModel.clearError() }
+                onClearError = { roomViewModel.clearError() },
+                onEnterCode = { code ->
+                    println("🔑 Joining room with code: $code")
+                    roomViewModel.joinRoomByCode(code)
+                }
             )
             OperationView.QR_SCANNER -> QRScannerScreen(
                 roomViewModel = roomViewModel,
@@ -126,8 +134,10 @@ private fun MainActionScreen(
     onNavigateToDebug: () -> Unit,
     onLogout: () -> Unit,
     onClearError: () -> Unit,
+    onEnterCode: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var showCodeDialog by remember { mutableStateOf(false) }
     // Error dialog
     if (error != null) {
         AlertDialog(
@@ -352,6 +362,80 @@ private fun MainActionScreen(
                         )
                     }
                 }
+            }
+
+            // Join via Code Button
+            Card(
+                onClick = { showCodeDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFF0F172A) // slate-900
+                ),
+                border = BorderStroke(1.dp, Color(0xFF1E293B)) // slate-800
+            ) {
+                Box(
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "JOIN OPERATION",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.5.sp,
+                            color = Color(0xFFFBBF24) // yellow-400
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = "인증 코드로 참여",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "4자리 코드를 입력하여 게임에 합류합니다.",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontStyle = FontStyle.Italic,
+                            color = Color(0xFF64748B), // slate-500
+                            lineHeight = 20.sp
+                        )
+                    }
+
+                    // Code Icon
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp)
+                            .size(60.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "#",
+                            fontSize = 48.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFFFBBF24).copy(alpha = 0.3f) // yellow-400
+                        )
+                    }
+                }
+            }
+
+            // Code Input Dialog
+            if (showCodeDialog) {
+                CodeInputDialog(
+                    onDismiss = { showCodeDialog = false },
+                    onConfirm = { code ->
+                        showCodeDialog = false
+                        onEnterCode(code)
+                    }
+                )
             }
 
             // Debug Settings Button
@@ -620,6 +704,28 @@ private fun RoomWaitingScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
+
+        // Back button
+        IconButton(
+            onClick = {
+                println("🔙 Back IconButton clicked in RoomWaitingScreen")
+                onBack()
+            },
+            modifier = Modifier
+                .zIndex(1f)
+                .statusBarsPadding()
+                .align(Alignment.TopStart)
+                .padding(16.dp)
+                .size(48.dp) // Increased touch area for iOS
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "뒤로가기",
+                tint = Color.White,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -633,356 +739,488 @@ private fun RoomWaitingScreen(
                 modifier = Modifier.padding(top = 40.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-            // WebSocket connection status
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(bottom = 8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .background(
-                            color = when (wsConnectionState) {
-                                com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.CONNECTED -> Color(0xFF22C55E) // green
-                                com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.CONNECTING -> Color(0xFFFBBF24) // yellow
-                                com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.ERROR -> Color(0xFFDC2626) // red
-                                else -> Color(0xFF64748B) // gray
-                            },
-                            shape = CircleShape
-                        )
-                )
-                Spacer(modifier = Modifier.width(6.dp))
+                // WebSocket connection status
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = when (wsConnectionState) {
+                                    com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.CONNECTED -> Color(
+                                        0xFF22C55E
+                                    ) // green
+                                    com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.CONNECTING -> Color(
+                                        0xFFFBBF24
+                                    ) // yellow
+                                    com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.ERROR -> Color(
+                                        0xFFDC2626
+                                    ) // red
+                                    else -> Color(0xFF64748B) // gray
+                                },
+                                shape = CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = when (wsConnectionState) {
+                            com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.CONNECTED -> "연결됨"
+                            com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.CONNECTING -> "연결 중..."
+                            com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.ERROR -> "연결 오류"
+                            else -> "연결 안됨"
+                        },
+                        fontSize = 10.sp,
+                        color = Color(0xFF94A3B8) // slate-400
+                    )
+                }
+
                 Text(
-                    text = when (wsConnectionState) {
-                        com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.CONNECTED -> "연결됨"
-                        com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.CONNECTING -> "연결 중..."
-                        com.heisthunt.app.network.RoomWebSocketClient.ConnectionState.ERROR -> "연결 오류"
-                        else -> "연결 안됨"
-                    },
+                    text = "MISSION BRIEFING",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black,
+                    fontStyle = FontStyle.Italic,
+                    color = Color.White
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "OPERATION: ${room.name.uppercase()}",
                     fontSize = 10.sp,
-                    color = Color(0xFF94A3B8) // slate-400
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp,
+                    color = Color(0xFF64748B) // slate-500
                 )
             }
 
-            Text(
-                text = "MISSION BRIEFING",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Black,
-                fontStyle = FontStyle.Italic,
-                color = Color.White
-            )
+            // QR Code Display
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Card(
+                    modifier = Modifier.padding(24.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color.White
+                    )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(192.dp)
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        QRCodeDisplay(
+                            roomCode = room.code,
+                            size = 160.dp
+                        )
+                    }
+                }
 
-            Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "요원들이 이 QR 코드를 스캔하면\n자동으로 작전에 투입됩니다.",
+                    fontSize = 14.sp,
+                    color = Color(0xFF94A3B8), // slate-400
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp
+                )
 
-            Text(
-                text = "OPERATION: ${room.name.uppercase()}",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.5.sp,
-                color = Color(0xFF64748B) // slate-500
-            )
-        }
+                Spacer(modifier = Modifier.height(12.dp))
 
-        // QR Code Display
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+                // Invitation Code (Simple text)
+                Text(
+                    text = "또는 초대 코드 ${room.code}를 입력하여 참여할 수 있습니다.",
+                    fontSize = 14.sp,
+                    color = Color(0xFF94A3B8), // slate-400
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp
+                )
+            }
+
+            // Participants and Start Button
             Card(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = Color.White
-                )
+                    containerColor = Color(0xFF0F172A).copy(alpha = 0.5f) // slate-900/50
+                ),
+                border = BorderStroke(1.dp, Color(0xFF1E293B)) // slate-800
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(192.dp)
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier.padding(24.dp)
                 ) {
-                    QRCodeDisplay(
-                        roomCode = room.code,
-                        size = 160.dp
-                    )
-                }
-            }
+                    // Participants count
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "투입된 요원",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF64748B) // slate-500
+                        )
 
-            Text(
-                text = "요원들이 이 QR 코드를 스캔하면\n자동으로 작전에 투입됩니다.",
-                fontSize = 14.sp,
-                color = Color(0xFF94A3B8), // slate-400
-                textAlign = TextAlign.Center,
-                lineHeight = 20.sp
-            )
-        }
+                        Text(
+                            text = "${room.participants.size} / ${room.settings.maxPlayers}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF3B82F6) // blue-500
+                        )
+                    }
 
-        // Participants and Start Button
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF0F172A).copy(alpha = 0.5f) // slate-900/50
-            ),
-            border = BorderStroke(1.dp, Color(0xFF1E293B)) // slate-800
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp)
-            ) {
-                // Participants count
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Participant avatars (horizontal)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        room.participants.take(8).forEach { participant ->
+                            val backgroundColor = when (participant.selectedRole) {
+                                PlayerRole.POLICE -> Color(0xFF2563EB) // blue
+                                PlayerRole.THIEF -> Color(0xFFDC2626) // red
+                                null -> Color(0xFF1E293B) // slate-800
+                            }
+                            val borderColor =
+                                if (participant.isReady) Color(0xFF22C55E) else Color(0xFF334155)
+
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(
+                                        color = backgroundColor,
+                                        shape = CircleShape
+                                    )
+                                    .border(
+                                        width = 2.dp,
+                                        color = borderColor,
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = participant.nickname.take(1).uppercase(),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+
+                        if (room.participants.size < room.settings.maxPlayers) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .border(
+                                        width = 2.dp,
+                                        color = Color(0xFF1E293B),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "+",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF334155)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    // Role Selection
+                    val currentUserId = com.heisthunt.app.di.AppModule.tokenStorage.userId
+                    val myParticipant = room.participants.find { it.userId == currentUserId }
+                    val selectedRole = myParticipant?.selectedRole
+                    val isReady = myParticipant?.isReady ?: false
+
+                    // Debug logging
+                    LaunchedEffect(selectedRole) {
+                        println("🎮 UI State - currentUserId: $currentUserId")
+                        println("🎮 UI State - myParticipant: ${myParticipant?.nickname}")
+                        println("🎮 UI State - selectedRole: $selectedRole")
+                        println("🎮 UI State - isReady: $isReady")
+                        println("🎮 UI State - room.id: ${room.id}")
+                    }
+
                     Text(
-                        text = "투입된 요원",
+                        text = "역할 선택",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF64748B) // slate-500
+                        color = Color(0xFF64748B),
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
 
-                    Text(
-                        text = "${room.participants.size} / ${room.settings.maxPlayers}",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFF3B82F6) // blue-500
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Participant avatars (horizontal)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    room.participants.take(8).forEach { participant ->
-                        val backgroundColor = when (participant.selectedRole) {
-                            PlayerRole.POLICE -> Color(0xFF2563EB) // blue
-                            PlayerRole.THIEF -> Color(0xFFDC2626) // red
-                            null -> Color(0xFF1E293B) // slate-800
-                        }
-                        val borderColor = if (participant.isReady) Color(0xFF22C55E) else Color(0xFF334155)
-
-                        Box(
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Police button
+                        Button(
+                            onClick = {
+                                println("🔵 Police button clicked! roomId=${room.id}")
+                                roomViewModel.selectRole(room.id, PlayerRole.POLICE)
+                            },
                             modifier = Modifier
-                                .size(40.dp)
-                                .background(
-                                    color = backgroundColor,
-                                    shape = CircleShape
-                                )
-                                .border(
-                                    width = 2.dp,
-                                    color = borderColor,
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
+                                .weight(1f)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selectedRole == PlayerRole.POLICE) Color(
+                                    0xFF2563EB
+                                ) else Color(0xFF334155),
+                                contentColor = Color.White
+                            )
                         ) {
                             Text(
-                                text = participant.nickname.take(1).uppercase(),
+                                text = "경찰",
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+
+                        // Thief button
+                        Button(
+                            onClick = {
+                                println("🔴 Thief button clicked! roomId=${room.id}")
+                                roomViewModel.selectRole(room.id, PlayerRole.THIEF)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selectedRole == PlayerRole.THIEF) Color(
+                                    0xFFDC2626
+                                ) else Color(0xFF334155),
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(
+                                text = "도둑",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 통합 버튼 (준비/시작)
+                    val isHost = room.hostId == currentUserId
+                    val allReady = room.participants.all { it.isReady }
+                    val allRoleSelected = room.participants.all { it.selectedRole != null }
+                    val enoughPlayers = room.participants.size >= 2
+                    val roomDetailState by roomViewModel.detailState.collectAsState()
+
+                    // 버튼 상태 결정
+                    val canStartGame =
+                        isHost && isReady && allReady && allRoleSelected && enoughPlayers
+
+                    // Debug logging
+                    LaunchedEffect(
+                        isHost,
+                        isReady,
+                        allReady,
+                        allRoleSelected,
+                        enoughPlayers,
+                        roomDetailState.isLoading
+                    ) {
+                        println("🚀 Button state check:")
+                        println("   isHost: $isHost")
+                        println("   isReady: $isReady")
+                        println("   allReady: $allReady")
+                        println("   allRoleSelected: $allRoleSelected")
+                        println("   enoughPlayers: $enoughPlayers")
+                        println("   canStartGame: $canStartGame")
+                        println("   isLoading: ${roomDetailState.isLoading}")
+                    }
+
+                    val buttonText = when {
+                        selectedRole == null -> "역할을 선택하세요"
+                        !isReady -> "준비"
+                        !isHost -> "준비 완료"
+                        !enoughPlayers -> "최소 2명 필요"
+                        !allRoleSelected -> "모두 역할 선택 필요"
+                        !allReady -> "모두 준비 필요"
+                        else -> "작전 개시"
+                    }
+                    val buttonEnabled = when {
+                        selectedRole == null -> false
+                        !isReady -> true
+                        !isHost -> true // 준비 완료 상태에서 클릭하면 준비 취소
+                        canStartGame && !roomDetailState.isLoading -> true
+                        else -> false
+                    }
+                    val buttonColor = when {
+                        canStartGame -> Color(0xFF2563EB) // blue-600 (작전 개시)
+                        isReady -> Color(0xFF22C55E) // green-500 (준비 완료)
+                        else -> Color(0xFF64748B) // slate-500 (준비)
+                    }
+
+                    Button(
+                        onClick = {
+                            println("🎯 Button clicked! canStartGame=$canStartGame, buttonText=$buttonText")
+                            if (canStartGame) {
+                                println("🚀 Starting game for room: ${room.id}")
+                                roomViewModel.startGame(room.id)
+                            } else {
+                                println("✋ Toggling ready for room: ${room.id}")
+                                roomViewModel.toggleReady(room.id)
+                            }
+                        },
+                        enabled = buttonEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = buttonColor,
+                            disabledContainerColor = Color(0xFF334155)
+                        )
+                    ) {
+                        if (roomDetailState.isLoading && canStartGame) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
                                 color = Color.White
                             )
-                        }
-                    }
-
-                    if (room.participants.size < room.settings.maxPlayers) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .border(
-                                    width = 2.dp,
-                                    color = Color(0xFF1E293B),
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        } else {
                             Text(
-                                text = "+",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF334155)
+                                text = buttonText,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Black
                             )
                         }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Role Selection
-                val currentUserId = com.heisthunt.app.di.AppModule.tokenStorage.userId
-                val myParticipant = room.participants.find { it.userId == currentUserId }
-                val selectedRole = myParticipant?.selectedRole
-                val isReady = myParticipant?.isReady ?: false
-
-                // Debug logging
-                LaunchedEffect(selectedRole) {
-                    println("🎮 UI State - currentUserId: $currentUserId")
-                    println("🎮 UI State - myParticipant: ${myParticipant?.nickname}")
-                    println("🎮 UI State - selectedRole: $selectedRole")
-                    println("🎮 UI State - isReady: $isReady")
-                    println("🎮 UI State - room.id: ${room.id}")
-                }
-
-                Text(
-                    text = "역할 선택",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF64748B),
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Police button
-                    Button(
-                        onClick = {
-                            println("🔵 Police button clicked! roomId=${room.id}")
-                            roomViewModel.selectRole(room.id, PlayerRole.POLICE)
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (selectedRole == PlayerRole.POLICE) Color(0xFF2563EB) else Color(0xFF334155),
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Text(
-                            text = "경찰",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                    }
-
-                    // Thief button
-                    Button(
-                        onClick = {
-                            println("🔴 Thief button clicked! roomId=${room.id}")
-                            roomViewModel.selectRole(room.id, PlayerRole.THIEF)
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (selectedRole == PlayerRole.THIEF) Color(0xFFDC2626) else Color(0xFF334155),
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Text(
-                            text = "도둑",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // 통합 버튼 (준비/시작)
-                val isHost = room.hostId == currentUserId
-                val allReady = room.participants.all { it.isReady }
-                val allRoleSelected = room.participants.all { it.selectedRole != null }
-                val enoughPlayers = room.participants.size >= 2
-                val roomDetailState by roomViewModel.detailState.collectAsState()
-
-                // 버튼 상태 결정
-                val canStartGame = isHost && isReady && allReady && allRoleSelected && enoughPlayers
-
-                // Debug logging
-                LaunchedEffect(isHost, isReady, allReady, allRoleSelected, enoughPlayers, roomDetailState.isLoading) {
-                    println("🚀 Button state check:")
-                    println("   isHost: $isHost")
-                    println("   isReady: $isReady")
-                    println("   allReady: $allReady")
-                    println("   allRoleSelected: $allRoleSelected")
-                    println("   enoughPlayers: $enoughPlayers")
-                    println("   canStartGame: $canStartGame")
-                    println("   isLoading: ${roomDetailState.isLoading}")
-                }
-
-                val buttonText = when {
-                    selectedRole == null -> "역할을 선택하세요"
-                    !isReady -> "준비"
-                    !isHost -> "준비 완료"
-                    !enoughPlayers -> "최소 2명 필요"
-                    !allRoleSelected -> "모두 역할 선택 필요"
-                    !allReady -> "모두 준비 필요"
-                    else -> "작전 개시"
-                }
-                val buttonEnabled = when {
-                    selectedRole == null -> false
-                    !isReady -> true
-                    !isHost -> true // 준비 완료 상태에서 클릭하면 준비 취소
-                    canStartGame && !roomDetailState.isLoading -> true
-                    else -> false
-                }
-                val buttonColor = when {
-                    canStartGame -> Color(0xFF2563EB) // blue-600 (작전 개시)
-                    isReady -> Color(0xFF22C55E) // green-500 (준비 완료)
-                    else -> Color(0xFF64748B) // slate-500 (준비)
-                }
-
-                Button(
-                    onClick = {
-                        println("🎯 Button clicked! canStartGame=$canStartGame, buttonText=$buttonText")
-                        if (canStartGame) {
-                            println("🚀 Starting game for room: ${room.id}")
-                            roomViewModel.startGame(room.id)
-                        } else {
-                            println("✋ Toggling ready for room: ${room.id}")
-                            roomViewModel.toggleReady(room.id)
-                        }
-                    },
-                    enabled = buttonEnabled,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = buttonColor,
-                        disabledContainerColor = Color(0xFF334155)
-                    )
-                ) {
-                    if (roomDetailState.isLoading && canStartGame) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = Color.White
-                        )
-                    } else {
-                        Text(
-                            text = buttonText,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black
-                        )
                     }
                 }
             }
         }
-        }
-
-        // Back button
-        IconButton(
-            onClick = {
-                println("🔙 Back IconButton clicked in RoomWaitingScreen")
-                onBack()
-            },
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp)
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "뒤로가기",
-                tint = Color.White,
-                modifier = Modifier.size(28.dp)
-            )
-        }
     }
+}
+
+@Composable
+private fun CodeInputDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var code by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "🔑",
+                    fontSize = 40.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "인증 코드 입력",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "4자리 인증 코드를 입력하세요",
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    color = Color(0xFF64748B)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                TextField(
+                    value = code,
+                    onValueChange = { newValue ->
+                        // Only allow uppercase letters and numbers, max 4 characters
+                        if (newValue.length <= 4) {
+                            code = newValue.uppercase().filter { it.isLetterOrDigit() }
+                            error = null
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("예: AB12", textAlign = TextAlign.Center) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center,
+                        letterSpacing = 4.sp
+                    ),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF0F172A),
+                        unfocusedContainerColor = Color(0xFF0F172A),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                if (error != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = error ?: "",
+                        fontSize = 12.sp,
+                        color = Color(0xFFEF4444),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (code.length == 4) {
+                        onConfirm(code)
+                    } else {
+                        error = "4자리 코드를 입력해주세요"
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFBBF24) // yellow-400
+                )
+            ) {
+                Text(
+                    text = "참여하기",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = Color(0xFF0F172A)
+                )
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, Color(0xFF64748B))
+            ) {
+                Text(
+                    text = "취소",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+        },
+        containerColor = Color(0xFF0F172A),
+        titleContentColor = Color.White,
+        textContentColor = Color.White
+    )
 }

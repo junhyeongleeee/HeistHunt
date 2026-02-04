@@ -55,5 +55,6 @@ data class Location(
 data class PlayerLocation(
     val userId: String,
     val location: Location,
-    val role: PlayerRole
+    val role: PlayerRole,
+    val lastUpdateTimestamp: Instant = kotlinx.datetime.Clock.System.now()
 )

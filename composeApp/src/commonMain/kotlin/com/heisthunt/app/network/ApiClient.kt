@@ -14,11 +14,9 @@ import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 
 class ApiClient(
-    internal val baseUrl: String = "http://10.0.2.2:8080" // Android emulator localhost
+    internal val baseUrl: String = "http://10.0.2.2:8080", // Android emulator localhost
+    private val tokenStorage: TokenStorage
 ) {
-    private var accessToken: String? = null
-    private var refreshToken: String? = null
-
     internal val client = HttpClient {
         install(ContentNegotiation) {
             json(Json {
@@ -38,21 +36,20 @@ class ApiClient(
     }
 
     fun setTokens(access: String, refresh: String) {
-        accessToken = access
-        refreshToken = refresh
+        tokenStorage.accessToken = access
+        tokenStorage.refreshToken = refresh
     }
 
     fun clearTokens() {
-        accessToken = null
-        refreshToken = null
+        tokenStorage.clear()
     }
 
-    fun hasTokens(): Boolean = accessToken != null
+    fun hasTokens(): Boolean = tokenStorage.accessToken != null
 
-    fun getAccessToken(): String? = accessToken
+    fun getAccessToken(): String? = tokenStorage.accessToken
 
     internal fun HttpRequestBuilder.authorize() {
-        accessToken?.let {
+        tokenStorage.accessToken?.let {
             header(HttpHeaders.Authorization, "Bearer $it")
         }
     }
@@ -77,7 +74,7 @@ class ApiClient(
     }
 
     suspend fun refreshTokens(): ApiResponse<TokenResponse> {
-        val token = refreshToken ?: throw IllegalStateException("No refresh token")
+        val token = tokenStorage.refreshToken ?: throw IllegalStateException("No refresh token")
         return client.post("$baseUrl/api/auth/refresh") {
             setBody(RefreshTokenRequest(token))
         }.body()

@@ -1,6 +1,7 @@
 package com.heisthunt.app.ui.game
 
-import androidx.activity.compose.BackHandler
+import com.heisthunt.app.utils.PlatformBackHandler
+import com.heisthunt.app.utils.formatDecimal
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -9,6 +10,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,8 +39,11 @@ fun GameScreen(
     onConfirmCatch: (thiefUserId: String, thiefNickname: String) -> Unit,
     onRejectCatch: (thiefUserId: String) -> Unit,
     onDismissCatchRequest: () -> Unit,
+    onLeaveGame: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    println("🎨 GameScreen rendering: myRole=$myRole, uiState.myRole=${uiState?.myRole}")
+
     // Use real data from local timer (hybrid approach)
     val timeLeft = uiState?.localRemainingSeconds?.toInt() ?: 300
     val escapeTimeLeft = uiState?.localEscapeRemainingSeconds?.toInt() ?: 300
@@ -48,8 +54,11 @@ fun GameScreen(
     val remainingThieves = uiState?.gameStatus?.remainingThieves ?: 3
     val totalThieves = uiState?.gameStatus?.totalThieves ?: 5
 
-    // BackHandler
-    BackHandler(onBack = onBack)
+    // Leave game confirmation dialog state
+    var showLeaveDialog by remember { mutableStateOf(false) }
+
+    // BackHandler - show confirmation dialog instead of leaving directly
+    PlatformBackHandler(onBack = { showLeaveDialog = true })
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(
@@ -66,7 +75,8 @@ fun GameScreen(
                 totalGameTime = totalGameTime,
                 gamePhase = gamePhase,
                 distanceFromCenter = distanceFromCenter,
-                maxRadius = maxRadius
+                maxRadius = maxRadius,
+                onLeaveClick = { showLeaveDialog = true }
             )
 
             // Map Section (지도)
@@ -77,6 +87,7 @@ fun GameScreen(
                     myRole = myRole,
                     safeRadiusMeters = maxRadius.toDouble(),
                     gameCenterLocation = uiState?.myLocation, // TODO: Get actual game center from server
+                    disconnectedPlayerIds = uiState?.disconnectedPlayerIds ?: emptySet(),
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -111,6 +122,18 @@ fun GameScreen(
                 onDismiss = onDismissCatchRequest
             )
         }
+
+        // Leave game confirmation dialog
+        if (showLeaveDialog) {
+            LeaveGameDialog(
+                onConfirm = {
+                    showLeaveDialog = false
+                    onLeaveGame()
+                    onBack()
+                },
+                onDismiss = { showLeaveDialog = false }
+            )
+        }
     }
 }
 
@@ -122,8 +145,11 @@ private fun StatusBar(
     totalGameTime: Int,
     gamePhase: String,
     distanceFromCenter: Int,
-    maxRadius: Int
+    maxRadius: Int,
+    onLeaveClick: () -> Unit
 ) {
+    println("🎨 StatusBar rendering: role=$role")
+
     val backgroundColor = if (role == PlayerRole.THIEF) {
         Color(0xFF450A0A) // red-950/20
     } else {
@@ -138,6 +164,29 @@ private fun StatusBar(
             .padding(horizontal = 24.dp, vertical = 16.dp)
             .padding(top = 32.dp)
     ) {
+        // Leave button
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+        ) {
+            IconButton(
+                onClick = {
+                    println("🔘 Leave button clicked!")
+                    onLeaveClick()
+                },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(48.dp) // Increase touch area for iOS
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "게임 나가기",
+                    tint = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
         // Timer and Radius Info
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -161,7 +210,7 @@ private fun StatusBar(
                     val timeColor = if (escapeTimeLeft < 60) Color(0xFFFBBF24) else Color(0xFF22C55E) // yellow or green
 
                     Text(
-                        text = String.format("%d:%02d", minutes, seconds),
+                        text = "$minutes:${seconds.toString().padStart(2, '0')}",
                         fontSize = 30.sp,
                         fontWeight = FontWeight.Black,
                         fontStyle = FontStyle.Italic,
@@ -194,7 +243,7 @@ private fun StatusBar(
                     val timeColor = if (timeLeft < 60) Color(0xFFEF4444) else Color.White
 
                     Text(
-                        text = String.format("%d:%02d", minutes, seconds),
+                        text = "$minutes:${seconds.toString().padStart(2, '0')}",
                         fontSize = 30.sp,
                         fontWeight = FontWeight.Black,
                         fontStyle = FontStyle.Italic,
@@ -501,7 +550,7 @@ private fun CatchTargetDialog(
                                 fontSize = 14.sp
                             )
                             Text(
-                                text = "위치: ${String.format("%.6f", thief.location.latitude)}, ${String.format("%.6f", thief.location.longitude)}",
+                                text = "위치: ${thief.location.latitude.formatDecimal(6)}, ${thief.location.longitude.formatDecimal(6)}",
                                 fontSize = 10.sp,
                                 modifier = Modifier.alpha(0.7f)
                             )
@@ -873,4 +922,71 @@ private fun ActionFooter(
             }
         }
     }
+}
+
+@Composable
+private fun LeaveGameDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "⚠️",
+                    fontSize = 40.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "게임 나가기",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        },
+        text = {
+            Text(
+                text = "정말로 게임을 나가시겠습니까?\n\n게임이 진행 중이며, 나가면 다시 돌아올 수 없습니다.",
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFDC2626) // red-600
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "나가기",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, Color(0xFF64748B))
+            ) {
+                Text(
+                    text = "취소",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+        },
+        containerColor = Color(0xFF0F172A),
+        titleContentColor = Color.White,
+        textContentColor = Color.White
+    )
 }
