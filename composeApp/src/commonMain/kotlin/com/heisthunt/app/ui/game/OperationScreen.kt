@@ -1,6 +1,6 @@
 package com.heisthunt.app.ui.game
 
-import androidx.activity.compose.BackHandler
+import com.heisthunt.app.utils.PlatformBackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -38,6 +38,8 @@ enum class OperationView {
 @Composable
 fun OperationScreen(
     roomViewModel: RoomViewModel,
+    authViewModel: com.heisthunt.app.viewmodel.AuthViewModel,
+    onNavigateToDebug: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var currentView by remember { mutableStateOf(OperationView.MAIN) }
@@ -72,11 +74,14 @@ fun OperationScreen(
                     roomViewModel.createRoom("New Operation Room")
                 },
                 onScanQR = { currentView = OperationView.QR_SCANNER },
+                onNavigateToDebug = onNavigateToDebug,
+                onLogout = { authViewModel.logout() },
                 onClearError = { roomViewModel.clearError() }
             )
             OperationView.QR_SCANNER -> QRScannerScreen(
                 roomViewModel = roomViewModel,
                 onCancel = {
+                    println("🔙 QR Scanner: Cancel clicked")
                     roomViewModel.clearError()
                     currentView = OperationView.MAIN
                 }
@@ -85,9 +90,12 @@ fun OperationScreen(
                 room = roomDetailState.room,
                 roomViewModel = roomViewModel,
                 onBack = {
+                    println("🔙 Waiting Room: Back clicked, room=${roomDetailState.room?.id}")
                     roomDetailState.room?.id?.let { roomId ->
+                        println("🔙 Leaving room: $roomId")
                         roomViewModel.leaveRoom(roomId)
                     }
+                    println("🔙 Setting currentView to MAIN")
                     currentView = OperationView.MAIN
                 }
             )
@@ -115,6 +123,8 @@ private fun MainActionScreen(
     error: String?,
     onCreateRoom: () -> Unit,
     onScanQR: () -> Unit,
+    onNavigateToDebug: () -> Unit,
+    onLogout: () -> Unit,
     onClearError: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -343,6 +353,32 @@ private fun MainActionScreen(
                     }
                 }
             }
+
+            // Debug Settings Button
+            TextButton(
+                onClick = onNavigateToDebug,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "🧪 Debug Settings",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF64748B)
+                )
+            }
+
+            // Logout Button
+            TextButton(
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "🚪 로그아웃",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFFDC2626) // red-600
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(80.dp))
@@ -358,7 +394,7 @@ private fun QRScannerScreen(
     var scannedCode by remember { mutableStateOf<String?>(null) }
 
     // Handle Android system back button
-    BackHandler(onBack = onCancel)
+    PlatformBackHandler(onBack = onCancel)
 
     Box(
         modifier = modifier
@@ -511,7 +547,10 @@ private fun ScannerOverlay(
 
         // Cancel button
         TextButton(
-            onClick = onCancel,
+            onClick = {
+                println("🔙 CANCEL button clicked in QRScannerScreen")
+                onCancel()
+            },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(32.dp)
@@ -564,7 +603,7 @@ private fun RoomWaitingScreen(
     }
 
     // Handle Android system back button
-    BackHandler(onBack = onBack)
+    PlatformBackHandler(onBack = onBack)
 
     // Show loading if room is null
     if (room == null) {
@@ -773,7 +812,7 @@ private fun RoomWaitingScreen(
                 Spacer(modifier = Modifier.height(32.dp))
 
                 // Role Selection
-                val currentUserId = TokenStorage.userId
+                val currentUserId = com.heisthunt.app.di.AppModule.tokenStorage.userId
                 val myParticipant = room.participants.find { it.userId == currentUserId }
                 val selectedRole = myParticipant?.selectedRole
                 val isReady = myParticipant?.isReady ?: false
@@ -930,7 +969,10 @@ private fun RoomWaitingScreen(
 
         // Back button
         IconButton(
-            onClick = onBack,
+            onClick = {
+                println("🔙 Back IconButton clicked in RoomWaitingScreen")
+                onBack()
+            },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(16.dp)
