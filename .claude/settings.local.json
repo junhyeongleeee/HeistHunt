@@ -96,7 +96,8 @@
       "Bash(jps:*)",
       "Bash(ping:*)",
       "Bash(PLATFORM_NAME=iphonesimulator SDK_NAME=iphonesimulator ARCHS=arm64 ./gradlew:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(xargs:*)"
     ]
   }
 }

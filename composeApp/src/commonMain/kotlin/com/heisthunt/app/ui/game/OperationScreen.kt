@@ -710,10 +710,8 @@ private fun RoomWaitingScreen(
         onDispose {
             println("Disconnecting from WebSocket")
             roomViewModel.disconnectFromRoom()
-            // Leave room when screen is disposed (app closed, navigated away, etc.)
-            room?.id?.let { roomId ->
-                roomViewModel.leaveRoom(roomId)
-            }
+            // Don't leave room here - only leave when explicitly requested via onBack
+            // If we leave here, it will clear the room state when navigating to game screen
         }
     }
 
