@@ -103,24 +103,55 @@ fun OperationScreen(
                         println("🔙 Leaving room: $roomId")
                         roomViewModel.leaveRoom(roomId)
                     }
+                    // Immediately clear room state to prevent stale data
+                    roomViewModel.clearRoom()
                     println("🔙 Setting currentView to MAIN")
                     currentView = OperationView.MAIN
                 }
             )
-            OperationView.GAME -> GameScreenContainer(
-                gameId = roomDetailState.gameId ?: "",
-                myRole = roomDetailState.myRole ?: PlayerRole.THIEF,
-                room = roomDetailState.room,
-                startTime = roomDetailState.gameStartTime,
-                escapeDurationSeconds = roomDetailState.escapeDurationSeconds,
-                totalDurationSeconds = roomDetailState.totalDurationSeconds,
-                onBack = {
-                    roomDetailState.room?.id?.let { roomId ->
-                        roomViewModel.leaveRoom(roomId)
+            OperationView.GAME -> {
+                println("🎯 [OperationScreen] Rendering GameScreenContainer")
+                println("🎯 [OperationScreen] roomDetailState.myRole: ${roomDetailState.myRole}")
+                println("🎯 [OperationScreen] gameId: ${roomDetailState.gameId}")
+                println("🎯 [OperationScreen] room participants: ${roomDetailState.room?.participants?.map { "${it.userId}: ${it.role}" }}")
+
+                // Check if myRole is null - this should never happen
+                if (roomDetailState.myRole == null) {
+                    println("❌ [OperationScreen] CRITICAL: myRole is null! Cannot start game.")
+                    Text(
+                        text = "오류: 역할 정보를 불러올 수 없습니다.\n게임을 시작할 수 없습니다.",
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                    Button(onClick = {
+                        roomViewModel.clearRoom()
+                        currentView = OperationView.MAIN
+                    }) {
+                        Text("돌아가기")
                     }
-                    currentView = OperationView.MAIN
+                } else {
+                    val actualMyRole = roomDetailState.myRole!!
+                    println("🎯 [OperationScreen] Using myRole: $actualMyRole (FROM STATE)")
+
+                    GameScreenContainer(
+                        gameId = roomDetailState.gameId ?: "",
+                        myRole = actualMyRole,
+                        room = roomDetailState.room,
+                        startTime = roomDetailState.gameStartTime,
+                        escapeDurationSeconds = roomDetailState.escapeDurationSeconds,
+                        totalDurationSeconds = roomDetailState.totalDurationSeconds,
+                        onBack = {
+                            println("🚪 [OperationScreen] Leaving game and clearing state")
+                            roomDetailState.room?.id?.let { roomId ->
+                                roomViewModel.leaveRoom(roomId)
+                            }
+                            // Immediately clear room state to prevent stale data
+                            roomViewModel.clearRoom()
+                            currentView = OperationView.MAIN
+                        }
+                    )
                 }
-            )
+            }
         }
     }
 }

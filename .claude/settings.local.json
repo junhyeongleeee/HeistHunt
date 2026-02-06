@@ -73,7 +73,30 @@
       "Bash(timeout 60 tail:*)",
       "Bash(unzip:*)",
       "Bash(strings:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(PGPASSWORD=heisthunt_password /opt/homebrew/bin/psql:*)",
+      "Bash(grep:*)",
+      "Bash(for i in {1..10})",
+      "Bash(do if curl -s http://localhost:8080/health)",
+      "Bash(then echo \"✅ Server is ready!\")",
+      "Bash(break)",
+      "Bash(else echo \"⏳ Attempt $i: Server not ready yet...\")",
+      "Bash(fi)",
+      "Bash(done)",
+      "Bash(for i in {1..30})",
+      "Bash(do if adb devices)",
+      "Bash(then echo \"✅ 에뮬레이터 부팅 완료!\")",
+      "Bash(else echo \"⏳ 대기 중... \\($i/30\\)\")",
+      "Bash(plutil:*)",
+      "Bash(tee:*)",
+      "WebFetch(domain:steelbeartaeng2.tistory.com)",
+      "Bash(pod install)",
+      "Bash(gem list:*)",
+      "Bash(ruby:*)",
+      "Bash(jps:*)",
+      "Bash(ping:*)",
+      "Bash(PLATFORM_NAME=iphonesimulator SDK_NAME=iphonesimulator ARCHS=arm64 ./gradlew:*)",
+      "Bash(sqlite3:*)"
     ]
   }
 }

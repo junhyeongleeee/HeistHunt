@@ -38,8 +38,14 @@ fun App(
     var currentScreen by remember { mutableStateOf(Screen.Login) }
 
     // Auto-login and game rejoin logic
+    // IMPORTANT: This only runs once when user logs in, not on every auth state change
+    var hasCheckedActiveGame by remember { mutableStateOf(false) }
+
     LaunchedEffect(authState.isLoggedIn) {
-        if (authState.isLoggedIn) {
+        if (authState.isLoggedIn && !hasCheckedActiveGame) {
+            hasCheckedActiveGame = true
+
+            println("🔍 Checking for active game on login...")
             // Check for active game
             val gameRepo = AppModule.gameRepository
             val result = gameRepo.getMyActiveGame()
@@ -47,6 +53,8 @@ fun App(
             result.onSuccess { activeGame ->
                 if (activeGame != null) {
                     println("✅ Active game found: ${activeGame.gameId}")
+                    println("   Role: ${activeGame.myRole}")
+                    println("   StartTime: ${activeGame.startTime}")
 
                     // Restore game state in RoomViewModel
                     roomViewModel.restoreGameState(
@@ -67,7 +75,8 @@ fun App(
                 println("❌ Failed to check active game: ${error.message}")
                 currentScreen = Screen.Operation
             }
-        } else {
+        } else if (!authState.isLoggedIn) {
+            hasCheckedActiveGame = false
             currentScreen = Screen.Login
         }
     }
@@ -128,25 +137,37 @@ fun App(
 
                 Screen.Game -> {
                     val gameId = roomDetailState.gameId ?: ""
-                    val myRole = roomDetailState.myRole ?: com.heisthunt.shared.models.PlayerRole.THIEF
+                    val myRole = roomDetailState.myRole
                     val room = roomDetailState.room
 
                     println("🎯 App.kt - Screen.Game:")
-                    println("   roomDetailState.myRole = ${roomDetailState.myRole}")
-                    println("   Using myRole = $myRole")
+                    println("   roomDetailState.myRole = $myRole")
 
-                    GameScreenContainer(
-                        gameId = gameId,
-                        myRole = myRole,
-                        room = room,
-                        startTime = roomDetailState.gameStartTime,
-                        escapeDurationSeconds = roomDetailState.escapeDurationSeconds,
-                        totalDurationSeconds = roomDetailState.totalDurationSeconds,
-                        onBack = {
+                    // If myRole is null, show error and return to operation screen
+                    if (myRole == null) {
+                        println("❌ App.kt - CRITICAL: myRole is null!")
+                        LaunchedEffect(Unit) {
                             currentScreen = Screen.Operation
                             roomViewModel.clearRoom()
                         }
-                    )
+                        Text(
+                            text = "오류: 역할 정보를 불러올 수 없습니다.",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        GameScreenContainer(
+                            gameId = gameId,
+                            myRole = myRole,
+                            room = room,
+                            startTime = roomDetailState.gameStartTime,
+                            escapeDurationSeconds = roomDetailState.escapeDurationSeconds,
+                            totalDurationSeconds = roomDetailState.totalDurationSeconds,
+                            onBack = {
+                                currentScreen = Screen.Operation
+                                roomViewModel.clearRoom()
+                            }
+                        )
+                    }
                 }
 
                 Screen.DebugSettings -> {

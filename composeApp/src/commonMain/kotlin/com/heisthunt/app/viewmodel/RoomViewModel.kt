@@ -67,45 +67,36 @@ class RoomViewModel(
             println("🎮 [RoomViewModel] startTime: ${event.startTime}")
             println("🎮 [RoomViewModel] escapeDurationSeconds: ${event.escapeDurationSeconds}")
             println("🎮 [RoomViewModel] totalDurationSeconds: ${event.totalDurationSeconds}")
-            viewModelScope.launch {
-                val roomId = _detailState.value.room?.id
-                println("🎮 [RoomViewModel] Current roomId: $roomId")
-                if (roomId != null) {
-                    println("📡 [RoomViewModel] Reloading room to get assigned roles...")
-                    // Reload room to get updated participant roles
-                    roomRepository.getRoom(roomId)
-                        .onSuccess { updatedRoom ->
-                            println("✅ [RoomViewModel] Room reloaded successfully")
-                            println("✅ [RoomViewModel] Participants count: ${updatedRoom.participants.size}")
-                            // Find current user's role from participants
-                            val currentUserId = com.heisthunt.app.di.AppModule.tokenStorage.userId
-                            val myParticipant = updatedRoom.participants.find { it.userId == currentUserId }
-                            val myRole = myParticipant?.role
+            println("🎮 [RoomViewModel] roleAssignments: ${event.roleAssignments}")
 
-                            println("🎭 [RoomViewModel] Current userId: $currentUserId")
-                            println("🎭 [RoomViewModel] My assigned role: $myRole")
+            // Get my role from the roleAssignments map
+            val currentUserId = com.heisthunt.app.di.AppModule.tokenStorage.userId
+            val myRoleName = event.roleAssignments[currentUserId]
+            val myRole = myRoleName?.let { PlayerRole.valueOf(it) }
 
-                            _detailState.value = _detailState.value.copy(
-                                room = updatedRoom,
-                                shouldNavigateToGame = true,
-                                gameId = event.gameId,
-                                myRole = myRole,
-                                gameStartTime = event.startTime,
-                                escapeDurationSeconds = event.escapeDurationSeconds,
-                                totalDurationSeconds = event.totalDurationSeconds
-                            )
-                            println("🚀 [RoomViewModel] Navigation state set!")
-                            println("🚀 [RoomViewModel] shouldNavigateToGame: true")
-                            println("🚀 [RoomViewModel] gameId: ${event.gameId}")
-                            println("🚀 [RoomViewModel] myRole: $myRole")
-                        }
-                        .onFailure { exception ->
-                            println("❌ [RoomViewModel] Failed to reload room: ${exception.message}")
-                        }
-                } else {
-                    println("❌ [RoomViewModel] roomId is null, cannot reload room!")
-                }
+            println("🎭 [RoomViewModel] Current userId: $currentUserId")
+            println("🎭 [RoomViewModel] My role from roleAssignments: $myRole")
+
+            if (myRole == null) {
+                println("❌ [RoomViewModel] ERROR: Could not find my role in roleAssignments!")
+                println("❌ [RoomViewModel] userId=$currentUserId not found in map: ${event.roleAssignments}")
+                println("❌ [RoomViewModel] This will cause incorrect role display!")
             }
+
+            _detailState.value = _detailState.value.copy(
+                shouldNavigateToGame = true,
+                gameId = event.gameId,
+                myRole = myRole,
+                gameStartTime = event.startTime,
+                escapeDurationSeconds = event.escapeDurationSeconds,
+                totalDurationSeconds = event.totalDurationSeconds
+            )
+
+            println("🚀 [RoomViewModel] Navigation state set!")
+            println("🚀 [RoomViewModel] shouldNavigateToGame: true")
+            println("🚀 [RoomViewModel] gameId: ${event.gameId}")
+            println("🚀 [RoomViewModel] myRole: $myRole")
+
             return
         }
 

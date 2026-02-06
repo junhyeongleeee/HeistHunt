@@ -24,7 +24,29 @@ actual class LocationService {
         currentCallback = onLocationUpdate
         errorCallback = onError
 
-        // Create and set delegate
+        // Check if mock location is enabled
+        if (MockLocationService.isEnabled) {
+            println("🧪 iOS LocationService: Using MOCK location service")
+
+            // Use NSTimer to simulate location updates
+            updateTimer = NSTimer.scheduledTimerWithTimeInterval(
+                interval = (intervalMillis / 1000.0),
+                repeats = true
+            ) { _ ->
+                val mockLocation = MockLocationService.getCurrentLocation()
+                println("🧪 iOS LocationService: Mock location - lat=${mockLocation.latitude}, lon=${mockLocation.longitude}")
+                onLocationUpdate(mockLocation)
+            }
+
+            // Send initial location immediately
+            val initialLocation = MockLocationService.getCurrentLocation()
+            onLocationUpdate(initialLocation)
+
+            println("✅ iOS LocationService: Mock location updates started")
+            return
+        }
+
+        // Create and set delegate for real location
         locationDelegate = LocationDelegate(
             onUpdate = { location ->
                 println("📍 iOS LocationService: Location updated - lat=${location.latitude}, lon=${location.longitude}")
@@ -61,6 +83,12 @@ actual class LocationService {
 
     @OptIn(ExperimentalForeignApi::class)
     actual suspend fun getCurrentLocation(): Result<Location> {
+        // Check if mock location is enabled
+        if (MockLocationService.isEnabled) {
+            println("🧪 iOS LocationService: Returning MOCK location")
+            return Result.success(MockLocationService.getCurrentLocation())
+        }
+
         return try {
             val currentLocation = locationManager.location
             if (currentLocation != null) {
@@ -80,6 +108,10 @@ actual class LocationService {
     }
 
     actual fun isLocationEnabled(): Boolean {
+        // If mock location is enabled, always return true
+        if (MockLocationService.isEnabled) {
+            return true
+        }
         return CLLocationManager.locationServicesEnabled()
     }
 }

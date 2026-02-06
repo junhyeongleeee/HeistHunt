@@ -35,7 +35,8 @@ sealed class RoomEvent {
         val gameId: String,
         val startTime: Instant,
         val escapeDurationSeconds: Long,
-        val totalDurationSeconds: Long
+        val totalDurationSeconds: Long,
+        val roleAssignments: Map<String, String> = emptyMap() // userId -> role name
     ) : RoomEvent()
 }
 

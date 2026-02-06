@@ -190,6 +190,14 @@ fun Route.gameRoutes() {
                         val startTime = result.response.startedAt
                         val totalDuration = result.response.durationMinutes * 60L
 
+                        // Get role assignments
+                        val roleAssignments = transaction {
+                            RoomParticipants.selectAll()
+                                .where { RoomParticipants.roomId eq roomId }
+                                .associate { it[RoomParticipants.userId] to (it[RoomParticipants.role] ?: "THIEF") }
+                        }
+                        println("🎭 Broadcasting role assignments: $roleAssignments")
+
                         // Broadcast GameStarted event to all clients in the room
                         RoomConnectionManager.broadcast(
                             roomId,
@@ -197,7 +205,8 @@ fun Route.gameRoutes() {
                                 gameId = gameId,
                                 startTime = startTime,
                                 escapeDurationSeconds = 300L, // 5 minutes
-                                totalDurationSeconds = totalDuration
+                                totalDurationSeconds = totalDuration,
+                                roleAssignments = roleAssignments
                             )
                         )
 

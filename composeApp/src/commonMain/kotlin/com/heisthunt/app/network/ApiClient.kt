@@ -148,6 +148,12 @@ class ApiClient(
         }.body()
     }
 
+    suspend fun leaveGame(gameId: String): ApiResponse<String> {
+        return client.post("$baseUrl/api/games/$gameId/leave") {
+            authorize()
+        }.body()
+    }
+
     // Generic methods for repositories - internal to avoid visibility issues
     internal suspend inline fun <reified T> get(path: String): T {
         return client.get("$baseUrl$path") {

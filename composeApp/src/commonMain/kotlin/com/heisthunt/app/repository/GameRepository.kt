@@ -60,10 +60,7 @@ class GameRepository(private val apiClient: ApiClient) {
 
     suspend fun leaveGame(gameId: String): Result<Unit> {
         return try {
-            val response = apiClient.post<Unit, ApiResponse<String>>(
-                "/api/games/$gameId/leave",
-                Unit
-            )
+            val response = apiClient.leaveGame(gameId)
             if (response.success) {
                 Result.success(Unit)
             } else {

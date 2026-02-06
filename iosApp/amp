@@ -1,0 +1,5 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project iosApp.xcodeproj -scheme iosApp -configuration Debug -destination "platform=iOS Simulator,id=D38E4D17-71AE-49D8-9575-592389DEE736" clean build 2
+
+2026-02-03 18:14:52.021 xcodebuild[5216:9225554] Writing error result bundle to /var/folders/xn/zz6td5r93gb1mqpnkhrskssh0000gn/T/ResultBundle_2026-03-02_18-14-0052.xcresult
+xcodebuild: error: Unknown build action '2'.

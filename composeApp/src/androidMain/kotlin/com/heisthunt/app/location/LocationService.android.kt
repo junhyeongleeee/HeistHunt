@@ -134,6 +134,10 @@ actual class LocationService(private val context: Context) {
     }
 
     actual fun isLocationEnabled(): Boolean {
+        // If mock location is enabled, always return true
+        if (MockLocationService.isEnabled) {
+            return true
+        }
         val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
                 locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
