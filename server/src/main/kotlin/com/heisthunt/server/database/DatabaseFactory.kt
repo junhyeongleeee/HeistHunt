@@ -72,5 +72,13 @@ object DatabaseFactory {
         } catch (e: Exception) {
             println("Migration warning: ${e.message}")
         }
+
+        // Migration: Add escape_duration_minutes column to rooms
+        try {
+            transaction.exec("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS escape_duration_minutes INTEGER DEFAULT 5")
+            println("✅ Migration: Added escape_duration_minutes column to rooms table")
+        } catch (e: Exception) {
+            println("⚠️ Migration warning: escape_duration_minutes column may already exist or failed: ${e.message}")
+        }
     }
 }

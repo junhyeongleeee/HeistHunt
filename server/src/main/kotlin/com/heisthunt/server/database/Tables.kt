@@ -38,6 +38,7 @@ object Rooms : Table("rooms") {
     val maxPlayers = integer("max_players").default(10)
     val policeRatio = float("police_ratio").default(0.3f)
     val gameDurationMinutes = integer("game_duration_minutes").default(30)
+    val escapeDurationMinutes = integer("escape_duration_minutes").default(5)
     val password = varchar("password", 100).nullable()
     val status = varchar("status", 20).default("WAITING")
     val createdAt = timestamp("created_at")

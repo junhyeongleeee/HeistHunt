@@ -21,6 +21,7 @@ data class RoomSettings(
     val maxPlayers: Int = 10,
     val policeRatio: Float = 0.3f,
     val gameDurationMinutes: Int = 30,
+    val escapeDurationMinutes: Int = 5,
     val password: String? = null
 )
 

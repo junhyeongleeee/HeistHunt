@@ -31,6 +31,7 @@ import com.heisthunt.app.viewmodel.RoomViewModel
 import com.heisthunt.app.camera.QRScannerView
 import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.models.Room
+import com.heisthunt.shared.models.RoomSettings
 
 enum class OperationView {
     MAIN, QR_SCANNER, WAITING, GAME
@@ -74,8 +75,8 @@ fun OperationScreen(
             OperationView.MAIN -> MainActionScreen(
                 isCreatingRoom = roomDetailState.isLoading,
                 error = roomDetailState.error,
-                onCreateRoom = {
-                    roomViewModel.createRoom("New Operation Room")
+                onCreateRoom = { settings ->
+                    roomViewModel.createRoom("New Operation Room", settings)
                 },
                 onScanQR = { currentView = OperationView.QR_SCANNER },
                 onNavigateToDebug = onNavigateToDebug,
@@ -148,6 +149,12 @@ fun OperationScreen(
                             // Immediately clear room state to prevent stale data
                             roomViewModel.clearRoom()
                             currentView = OperationView.MAIN
+                        },
+                        onGameEnded = { result ->
+                            // TODO: Navigate to result screen (Phase 1.1 implementation)
+                            println("🏁 [OperationScreen] Game ended: winner=${result.winner}")
+                            roomViewModel.clearRoom()
+                            currentView = OperationView.MAIN
                         }
                     )
                 }
@@ -160,7 +167,7 @@ fun OperationScreen(
 private fun MainActionScreen(
     isCreatingRoom: Boolean,
     error: String?,
-    onCreateRoom: () -> Unit,
+    onCreateRoom: (RoomSettings) -> Unit,
     onScanQR: () -> Unit,
     onNavigateToDebug: () -> Unit,
     onLogout: () -> Unit,
@@ -169,6 +176,7 @@ private fun MainActionScreen(
     modifier: Modifier = Modifier
 ) {
     var showCodeDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
     // Error dialog
     if (error != null) {
         AlertDialog(
@@ -245,7 +253,11 @@ private fun MainActionScreen(
         ) {
             // Create Room Button
             Card(
-                onClick = { if (!isCreatingRoom) onCreateRoom() },
+                onClick = {
+                    if (!isCreatingRoom) {
+                        showSettingsDialog = true
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(
@@ -465,6 +477,17 @@ private fun MainActionScreen(
                     onConfirm = { code ->
                         showCodeDialog = false
                         onEnterCode(code)
+                    }
+                )
+            }
+
+            // Game Settings Dialog
+            if (showSettingsDialog) {
+                com.heisthunt.app.ui.components.GameSettingsDialog(
+                    onDismiss = { showSettingsDialog = false },
+                    onConfirm = { settings ->
+                        showSettingsDialog = false
+                        onCreateRoom(settings)
                     }
                 )
             }
