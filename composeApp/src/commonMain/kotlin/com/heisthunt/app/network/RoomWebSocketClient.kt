@@ -19,6 +19,13 @@ class RoomWebSocketClient(
         install(WebSockets)
     }
 
+    private val json = Json {
+        prettyPrint = true
+        isLenient = true
+        ignoreUnknownKeys = true
+        classDiscriminator = "type"
+    }
+
     private var session: DefaultClientWebSocketSession? = null
     private val _events = MutableSharedFlow<RoomEvent>(replay = 0, extraBufferCapacity = 10)
     val events: SharedFlow<RoomEvent> = _events.asSharedFlow()
@@ -64,7 +71,7 @@ class RoomWebSocketClient(
                                 val text = frame.readText()
                                 println("Received WebSocket message: $text")
                                 try {
-                                    val event = Json.decodeFromString<RoomEvent>(text)
+                                    val event = json.decodeFromString<RoomEvent>(text)
                                     println("Parsed event: ${event::class.simpleName}")
                                     _events.emit(event)
                                 } catch (e: Exception) {
@@ -108,8 +115,8 @@ class RoomWebSocketClient(
 
     suspend fun send(action: RoomAction) {
         try {
-            val json = Json.encodeToString<RoomAction>(action)
-            session?.send(Frame.Text(json))
+            val jsonString = json.encodeToString<RoomAction>(action)
+            session?.send(Frame.Text(jsonString))
             println("Sent WebSocket action: ${action::class.simpleName}")
         } catch (e: Exception) {
             println("Error sending WebSocket message: ${e.message}")

@@ -67,6 +67,23 @@ fun GameScreen(
                 .navigationBarsPadding()
                 .background(Color(0xFF020617)) // slate-950
         ) {
+            // DEBUG: Show role information
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.Red.copy(alpha = 0.8f))
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text("🐛 DEBUG INFO", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Param myRole: $myRole", color = Color.White, fontSize = 12.sp)
+                    Text("UiState myRole: ${uiState?.myRole}", color = Color.White, fontSize = 12.sp)
+                    Text("Game Phase: $gamePhase", color = Color.White, fontSize = 12.sp)
+                    Text("Time Left: $timeLeft", color = Color.White, fontSize = 12.sp)
+                    Text("Escape Time: $escapeTimeLeft", color = Color.White, fontSize = 12.sp)
+                }
+            }
+
             // Status Bar (상단)
             StatusBar(
                 role = myRole,
@@ -93,13 +110,35 @@ fun GameScreen(
 
                 // GPS/Location 에러는 표시하지 않음 (실내에서도 게임 가능)
 
-                // Police: Thief detection alert
+                // ESCAPE phase: Police violation alert (thieves only)
+                if (myRole == PlayerRole.THIEF &&
+                    uiState?.policeViolation != null &&
+                    gamePhase == "ESCAPE") {
+                    PoliceViolationAlert(
+                        distanceFromJail = uiState.policeViolation.distanceFromJail,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+
+                // CHASE phase: Proximity alert (both roles)
+                if (uiState?.nearbyEnemies != null && gamePhase == "CHASE") {
+                    ProximityAlert(
+                        myRole = myRole,
+                        enemyCount = uiState.nearbyEnemies.count,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+
+                // Legacy: Police thief detection alert (kept for backward compatibility)
+                // This is now replaced by ProximityAlert but keeping it for now
+                /*
                 if (myRole == PlayerRole.POLICE && uiState?.nearbyThieves?.isNotEmpty() == true) {
                     CatchDetectionAlert(
                         nearbyThievesCount = uiState.nearbyThieves.size,
                         modifier = Modifier.align(Alignment.TopCenter)
                     )
                 }
+                */
             }
 
             // Action Footer (하단)
@@ -415,6 +454,116 @@ private fun CatchDetectionAlert(
                 )
                 Text(
                     text = "반경 5m 이내에 도둑 ${nearbyThievesCount}명",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PoliceViolationAlert(
+    distanceFromJail: Double,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth(0.9f)
+            .padding(top = 16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xE6DC2626) // red-600/90
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .alpha(
+                    rememberInfiniteTransition().animateFloat(
+                        initialValue = 0.7f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(500),
+                            repeatMode = RepeatMode.Reverse
+                        )
+                    ).value
+                ),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "⚠️",
+                fontSize = 24.sp
+            )
+            Column {
+                Text(
+                    text = "경찰이 이탈했습니다!",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+                Text(
+                    text = "감옥에서 ${distanceFromJail.toInt()}m 이탈",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProximityAlert(
+    myRole: PlayerRole,
+    enemyCount: Int,
+    modifier: Modifier = Modifier
+) {
+    val (message, icon, color) = when (myRole) {
+        PlayerRole.THIEF -> Triple("경찰 감지!", "🚨", Color(0xE6DC2626)) // red-600/90
+        PlayerRole.POLICE -> Triple("도둑 감지!", "🎯", Color(0xE62563EB)) // blue-600/90
+    }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth(0.9f)
+            .padding(top = 16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = color
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .alpha(
+                    rememberInfiniteTransition().animateFloat(
+                        initialValue = 0.7f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(500),
+                            repeatMode = RepeatMode.Reverse
+                        )
+                    ).value
+                ),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = icon,
+                fontSize = 24.sp
+            )
+            Column {
+                Text(
+                    text = message,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+                Text(
+                    text = "반경 5m 이내에 ${enemyCount}명",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White.copy(alpha = 0.9f)

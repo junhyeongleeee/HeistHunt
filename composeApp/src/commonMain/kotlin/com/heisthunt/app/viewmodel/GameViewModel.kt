@@ -21,6 +21,17 @@ data class CatchRequestState(
     val thiefUserId: String
 )
 
+data class PoliceViolationState(
+    val policeUserId: String,
+    val distanceFromJail: Double,
+    val timestamp: kotlinx.datetime.Instant
+)
+
+data class ProximityAlertState(
+    val enemyRole: PlayerRole,
+    val count: Int
+)
+
 data class GameUiState(
     val gameId: String,
     val myRole: PlayerRole,
@@ -44,7 +55,10 @@ data class GameUiState(
     val totalDurationSeconds: Long = 1200L,
     val currentPhase: String = "ESCAPE",
     val localRemainingSeconds: Long = 300L,
-    val localEscapeRemainingSeconds: Long = 300L
+    val localEscapeRemainingSeconds: Long = 300L,
+    // Phase-based alerts
+    val policeViolation: PoliceViolationState? = null, // For thief in ESCAPE: police left jail
+    val nearbyEnemies: ProximityAlertState? = null // For both in CHASE: enemies within 5m
 )
 
 class GameViewModel(
@@ -141,8 +155,9 @@ class GameViewModel(
                         disconnectedPlayerIds = disconnected
                     )
                 }
-                // Calculate nearby thieves for police
-                updateNearbyThieves()
+                // Calculate nearby enemies
+                updateNearbyThieves() // For police
+                updateNearbyPolice()  // For thieves
             }
             is WebSocketMessage.PlayerCaught -> {
                 println("Player caught: ${event.nickname}")
@@ -221,6 +236,23 @@ class GameViewModel(
                 println("WebSocket error: ${event.message}")
                 _uiState.update { it.copy(error = event.message) }
             }
+            is WebSocketMessage.PoliceViolation -> {
+                println("Police violation detected: ${event.policeUserId} is ${event.distanceFromJail}m from jail")
+                _uiState.update {
+                    it.copy(
+                        policeViolation = PoliceViolationState(
+                            policeUserId = event.policeUserId,
+                            distanceFromJail = event.distanceFromJail,
+                            timestamp = kotlinx.datetime.Clock.System.now()
+                        )
+                    )
+                }
+                // 5초 후 자동 제거
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(5000L)
+                    _uiState.update { it.copy(policeViolation = null) }
+                }
+            }
             else -> {
                 println("Unhandled WebSocket event: ${event::class.simpleName}")
             }
@@ -232,6 +264,9 @@ class GameViewModel(
 
         // Only police need to detect nearby thieves
         if (currentState.myRole != PlayerRole.POLICE) return
+
+        // Only in CHASE phase
+        if (currentState.currentPhase != "CHASE") return
 
         val myLocation = currentState.myLocation ?: return
         val playerLocations = currentState.playerLocations
@@ -248,9 +283,60 @@ class GameViewModel(
             )
         }
 
-        if (nearby.size != currentState.nearbyThieves.size) {
+        val previousCount = currentState.nearbyThieves.size
+        if (nearby.size != previousCount) {
             println("Nearby thieves: ${nearby.size}")
-            _uiState.update { it.copy(nearbyThieves = nearby) }
+            _uiState.update {
+                it.copy(
+                    nearbyThieves = nearby,
+                    nearbyEnemies = if (nearby.isNotEmpty()) {
+                        ProximityAlertState(
+                            enemyRole = PlayerRole.THIEF,
+                            count = nearby.size
+                        )
+                    } else null
+                )
+            }
+        }
+    }
+
+    private fun updateNearbyPolice() {
+        val currentState = _uiState.value
+
+        // Only thieves need to detect nearby police
+        if (currentState.myRole != PlayerRole.THIEF) return
+
+        // Only in CHASE phase
+        if (currentState.currentPhase != "CHASE") return
+
+        val myLocation = currentState.myLocation ?: return
+        val playerLocations = currentState.playerLocations
+
+        // Find police within 5 meters
+        val nearby = playerLocations.filter { player ->
+            player.role == PlayerRole.POLICE &&
+            GeoUtils.isWithinRadius(
+                lat1 = myLocation.latitude,
+                lon1 = myLocation.longitude,
+                lat2 = player.location.latitude,
+                lon2 = player.location.longitude,
+                radiusMeters = 5.0
+            )
+        }
+
+        val previousCount = currentState.nearbyEnemies?.count ?: 0
+        if (nearby.size != previousCount) {
+            println("Nearby police: ${nearby.size}")
+            _uiState.update {
+                it.copy(
+                    nearbyEnemies = if (nearby.isNotEmpty()) {
+                        ProximityAlertState(
+                            enemyRole = PlayerRole.POLICE,
+                            count = nearby.size
+                        )
+                    } else null
+                )
+            }
         }
     }
 
@@ -278,8 +364,9 @@ class GameViewModel(
                     wsClient.sendLocation(location)
                 }
 
-                // Check for nearby thieves (for police)
-                updateNearbyThieves()
+                // Check for nearby enemies
+                updateNearbyThieves() // For police
+                updateNearbyPolice()  // For thieves
             },
             onError = { error ->
                 println("Location error: $error")
@@ -406,6 +493,19 @@ class GameViewModel(
 
             // Disconnect WebSocket
             wsClient.disconnect()
+
+            // Reset UI state to initial values
+            _uiState.update {
+                GameUiState(
+                    gameId = gameId,
+                    myRole = myRole,
+                    startTime = startTime,
+                    escapeDurationSeconds = escapeDurationSeconds,
+                    totalDurationSeconds = totalDurationSeconds,
+                    connectionState = GameWebSocketClient.ConnectionState.DISCONNECTED
+                )
+            }
+            println("🔄 Game state reset to initial values")
         }
     }
 

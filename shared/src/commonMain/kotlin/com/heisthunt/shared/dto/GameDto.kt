@@ -113,4 +113,16 @@ sealed class WebSocketMessage {
 
     @Serializable
     data class Error(val message: String) : WebSocketMessage()
+
+    @Serializable
+    data class PoliceViolation(
+        val policeUserId: String,
+        val distanceFromJail: Double
+    ) : WebSocketMessage()
+
+    @Serializable
+    data class EnemyProximityAlert(
+        val enemyRole: PlayerRole,
+        val count: Int
+    ) : WebSocketMessage()
 }
