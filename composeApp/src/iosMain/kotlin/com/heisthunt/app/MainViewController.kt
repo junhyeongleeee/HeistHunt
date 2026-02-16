@@ -17,34 +17,48 @@ fun MainViewController() = ComposeUIViewController {
 
     App(
         onGoogleLogin = suspend {
-            println("🔵 iOS Google Sign-In button clicked")
-            val result = googleAuthService.signIn()
+            println("🔵 [MainViewController] onGoogleLogin lambda started")
+            try {
+                println("🔵 [MainViewController] Calling googleAuthService.signIn()")
+                val result = googleAuthService.signIn()
+                println("🔵 [MainViewController] googleAuthService.signIn() returned: success=${result.success}, email=${result.email}")
 
-            if (result.success && result.email != null) {
-                println("✅ iOS Google Sign-In success: ${result.email}")
+                if (result.success && result.idToken != null) {
+                    println("✅ [MainViewController] Google Sign-In success: ${result.email}")
+                    println("🔵 [MainViewController] ID Token: ${result.idToken.take(20)}...")
 
-                // Authenticate with backend server
-                try {
-                    val authResult = withContext(Dispatchers.IO) {
-                        AppModule.authRepository.googleLogin(result.email)
-                    }
-
-                    authResult.fold(
-                        onSuccess = { user ->
-                            println("✅ Backend authentication success: ${user.nickname}")
-                            true
-                        },
-                        onFailure = { error ->
-                            println("❌ Backend authentication failed: ${error.message}")
-                            false
+                    // Authenticate with backend server
+                    try {
+                        println("🔵 [MainViewController] Starting backend authentication")
+                        val authResult = withContext(Dispatchers.IO) {
+                            AppModule.authRepository.googleLogin(result.idToken)
                         }
-                    )
-                } catch (e: Exception) {
-                    println("❌ Exception during backend authentication: ${e.message}")
+                        println("🔵 [MainViewController] Backend call completed")
+
+                        val finalResult = authResult.fold(
+                            onSuccess = { user ->
+                                println("✅ [MainViewController] Backend authentication success: ${user.nickname}")
+                                true
+                            },
+                            onFailure = { error ->
+                                println("❌ [MainViewController] Backend authentication failed: ${error.message}")
+                                false
+                            }
+                        )
+                        println("🔵 [MainViewController] Returning: $finalResult")
+                        finalResult
+                    } catch (e: Exception) {
+                        println("❌ [MainViewController] Exception during backend authentication: ${e.message}")
+                        e.printStackTrace()
+                        false
+                    }
+                } else {
+                    println("❌ [MainViewController] Google Sign-In failed: ${result.error}")
                     false
                 }
-            } else {
-                println("❌ iOS Google Sign-In failed: ${result.error}")
+            } catch (e: Exception) {
+                println("❌ [MainViewController] Exception in onGoogleLogin: ${e.message}")
+                e.printStackTrace()
                 false
             }
         }

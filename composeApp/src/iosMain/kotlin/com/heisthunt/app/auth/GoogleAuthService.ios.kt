@@ -13,22 +13,36 @@ object GoogleSignInCallback {
     private var currentContinuation: Continuation<GoogleSignInResult>? = null
 
     // Called from Swift when sign-in completes
-    fun onSignInResult(success: Boolean, userId: String?, email: String?, displayName: String?, error: String?) {
+    fun onSignInResult(success: Boolean, userId: String?, email: String?, displayName: String?, idToken: String?, error: String?) {
+        println("🟢 [Kotlin] onSignInResult called: success=$success, email=$email, idToken=${idToken?.take(20)}...")
         val result = GoogleSignInResult(
             success = success,
             userId = userId,
             email = email,
             displayName = displayName,
+            idToken = idToken,
             error = error
         )
-        currentContinuation?.resume(result)
-        currentContinuation = null
+        if (currentContinuation != null) {
+            println("🟢 [Kotlin] Resuming continuation with result")
+            currentContinuation?.resume(result)
+            currentContinuation = null
+        } else {
+            println("❌ [Kotlin] ERROR: No continuation to resume!")
+        }
     }
 
     suspend fun performSignIn(): GoogleSignInResult = suspendCoroutine { continuation ->
+        println("🟡 [Kotlin] performSignIn: Setting up suspension")
         currentContinuation = continuation
-        signInCallback?.invoke {
-            GoogleSignInResult(success = false, error = "Callback not completed")
+        if (signInCallback != null) {
+            println("🟡 [Kotlin] Invoking signInCallback")
+            signInCallback?.invoke {
+                GoogleSignInResult(success = false, error = "Callback not completed")
+            }
+        } else {
+            println("❌ [Kotlin] ERROR: signInCallback is null!")
+            continuation.resume(GoogleSignInResult(success = false, error = "signInCallback not set"))
         }
     }
 }

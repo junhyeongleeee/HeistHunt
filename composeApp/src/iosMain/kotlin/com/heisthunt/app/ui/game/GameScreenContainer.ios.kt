@@ -9,6 +9,7 @@ import com.heisthunt.app.location.LocationService
 import com.heisthunt.app.viewmodel.GameViewModel
 import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.models.Room
+import kotlinx.datetime.Clock
 
 @Composable
 actual fun GameScreenContainer(
@@ -22,13 +23,24 @@ actual fun GameScreenContainer(
 ) {
     val locationService = remember { LocationService() }
 
-    val viewModel = remember(gameId) {
-        println("🎮 [iOS] GameScreenContainer creating ViewModel:")
+    // Create unique key to force new ViewModel creation for each game
+    // IMPORTANT: Don't cache ViewModel - create new one for each game
+    val viewModelKey = remember(gameId, myRole, startTime) {
+        "$gameId-$myRole-${startTime?.toEpochMilliseconds() ?: Clock.System.now().toEpochMilliseconds()}"
+    }
+
+    val viewModel = remember(viewModelKey) {
+        println("═══════════════════════════════════════════")
+        println("🎮 [iOS] Creating NEW GameViewModel")
+        println("═══════════════════════════════════════════")
+        println("  viewModelKey: $viewModelKey")
         println("  gameId: $gameId")
-        println("  myRole: $myRole")
+        println("  myRole: $myRole (${myRole.name})")
         println("  startTime: $startTime")
+        println("  startTime is null: ${startTime == null}")
         println("  escapeDurationSeconds: $escapeDurationSeconds")
         println("  totalDurationSeconds: $totalDurationSeconds")
+        println("═══════════════════════════════════════════")
 
         AppModule.provideGameViewModel(
             gameId = gameId,
@@ -87,8 +99,17 @@ actual fun GameScreenContainer(
     val myNickname = "Player" // Placeholder
 
     // Render the actual game screen
-    // Use uiState.myRole if available (more reliable), fallback to parameter myRole
-    val actualRole = uiState.myRole ?: myRole
+    // IMPORTANT: Use parameter myRole (from navigation), NOT uiState.myRole
+    // uiState.myRole might contain old data if ViewModel wasn't cleared properly
+    val actualRole = myRole
+
+    println("🎨 [iOS] Rendering GameScreen:")
+    println("  actualRole: $actualRole (${actualRole.name})")
+    println("  uiState.myRole: ${uiState.myRole?.name}")
+    println("  uiState.currentPhase: ${uiState.currentPhase}")
+    println("  uiState.localRemainingSeconds: ${uiState.localRemainingSeconds}")
+    println("  uiState.localEscapeRemainingSeconds: ${uiState.localEscapeRemainingSeconds}")
+    println("  uiState.startTime: ${uiState.startTime}")
 
     GameScreen(
         gameId = gameId,

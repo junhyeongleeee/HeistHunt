@@ -15,12 +15,14 @@ import ComposeApp
 
     private func registerCallbacks() {
         // Set sign-in callback
-        GoogleSignInCallback.shared.signInCallback = { [weak self] onComplete in
+        GoogleSignInCallback.shared.signInCallback = { [weak self] _ in
+            print("🔵 iOS Google Sign-In button clicked")
             self?.performSignIn()
         }
 
         // Set sign-out callback
         GoogleSignInCallback.shared.signOutCallback = { [weak self] in
+            print("🔵 iOS Google Sign-Out called")
             self?.performSignOut()
         }
 
@@ -31,6 +33,20 @@ import ComposeApp
     }
 
     private func performSignIn() {
+        // UI Testing Mode: Auto Mock Login
+        if ProcessInfo.processInfo.arguments.contains("UI_TESTING") {
+            print("🧪 UI Testing Mode: Mock Google Sign-In")
+            GoogleSignInCallback.shared.onSignInResult(
+                success: true,
+                userId: "test-user-123",
+                email: "test@heisthunt.com",
+                displayName: "Test User",
+                idToken: "mock-id-token-for-testing",
+                error: nil
+            )
+            return
+        }
+
         // Get root view controller
         guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
               let rootViewController = scene.windows.first?.rootViewController else {
@@ -39,6 +55,7 @@ import ComposeApp
                 userId: nil,
                 email: nil,
                 displayName: nil,
+                idToken: nil,
                 error: "No view controller available"
             )
             return
@@ -52,6 +69,7 @@ import ComposeApp
                 userId: nil,
                 email: nil,
                 displayName: nil,
+                idToken: nil,
                 error: "Please update GIDClientID in Info.plist"
             )
             return
@@ -69,6 +87,7 @@ import ComposeApp
                     userId: nil,
                     email: nil,
                     displayName: nil,
+                    idToken: nil,
                     error: "Sign-In Error: \(error.localizedDescription)"
                 )
                 return
@@ -81,6 +100,7 @@ import ComposeApp
                     userId: nil,
                     email: nil,
                     displayName: nil,
+                    idToken: nil,
                     error: "Failed to get user profile"
                 )
                 return
@@ -89,15 +109,20 @@ import ComposeApp
             let userId = user.userID ?? ""
             let email = profile.email
             let displayName = profile.name
+            let idToken = user.idToken?.tokenString
 
-            print("✅ Google Sign-In Success: \(email)")
+            print("✅ [Swift] Google Sign-In Success: \(email)")
+            print("🔵 [Swift] ID Token: \(idToken?.prefix(20) ?? "nil")...")
+            print("🟢 [Swift] Calling GoogleSignInCallback.shared.onSignInResult")
             GoogleSignInCallback.shared.onSignInResult(
                 success: true,
                 userId: userId,
                 email: email,
                 displayName: displayName,
+                idToken: idToken,
                 error: nil
             )
+            print("🟢 [Swift] onSignInResult call completed")
         }
     }
 
@@ -117,6 +142,7 @@ import ComposeApp
             userId: user.userID ?? "",
             email: profile.email,
             displayName: profile.name,
+            idToken: user.idToken?.tokenString,
             error: nil
         )
     }
