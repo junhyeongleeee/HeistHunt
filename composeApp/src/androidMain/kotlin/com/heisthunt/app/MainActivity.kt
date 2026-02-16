@@ -26,13 +26,13 @@ class MainActivity : ComponentActivity() {
                 onGoogleLogin = suspend {
                     android.util.Log.d("MainActivity", "Google login started")
                     val result = googleAuthService.signIn()
-                    android.util.Log.d("MainActivity", "Google login result: success=${result.success}, email=${result.email}, error=${result.error}")
-                    if (result.success && result.email != null) {
-                        android.util.Log.d("MainActivity", "Calling backend with email: ${result.email}")
+                    android.util.Log.d("MainActivity", "Google login result: success=${result.success}, email=${result.email}, idToken=${result.idToken?.take(20)}..., error=${result.error}")
+                    if (result.success && result.idToken != null) {
+                        android.util.Log.d("MainActivity", "Calling backend with idToken for: ${result.email}")
                         // Authenticate with backend server
                         try {
                             val authResult = withContext(Dispatchers.IO) {
-                                AppModule.authRepository.googleLogin(result.email)
+                                AppModule.authRepository.googleLogin(result.idToken)
                             }
 
                             authResult.fold(

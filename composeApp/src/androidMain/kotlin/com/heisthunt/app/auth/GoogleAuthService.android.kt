@@ -66,15 +66,18 @@ actual class GoogleAuthService(private val context: Context) {
 
                         val user = authResult.user
                         if (user != null) {
+                            Log.d("GoogleAuthService", "✅ Sign-in success: ${user.email}")
                             GoogleSignInResult(
                                 success = true,
                                 userId = user.uid,
                                 email = user.email,
-                                displayName = user.displayName
+                                displayName = user.displayName,
+                                idToken = googleIdToken
                             )
                         } else {
                             GoogleSignInResult(
                                 success = false,
+                                idToken = null,
                                 error = "Failed to get user information"
                             )
                         }
@@ -82,6 +85,7 @@ actual class GoogleAuthService(private val context: Context) {
                         Log.e("GoogleAuthService", "GoogleIdToken parsing error", e)
                         GoogleSignInResult(
                             success = false,
+                            idToken = null,
                             error = "Failed to parse Google ID token: ${e.message}"
                         )
                     }
@@ -90,6 +94,7 @@ actual class GoogleAuthService(private val context: Context) {
                     Log.e("GoogleAuthService", "Unexpected credential type: ${credential.type}")
                     GoogleSignInResult(
                         success = false,
+                        idToken = null,
                         error = "Invalid credential type: ${credential.type}"
                     )
                 }
@@ -98,24 +103,28 @@ actual class GoogleAuthService(private val context: Context) {
             Log.e("GoogleAuthService", "Sign-in cancelled", e)
             GoogleSignInResult(
                 success = false,
+                idToken = null,
                 error = "Sign-in was cancelled"
             )
         } catch (e: NoCredentialException) {
             Log.e("GoogleAuthService", "No credential found", e)
             GoogleSignInResult(
                 success = false,
+                idToken = null,
                 error = "No Google account found. Please add a Google account to your device."
             )
         } catch (e: GetCredentialException) {
             Log.e("GoogleAuthService", "Credential error: ${e.type}, ${e.errorMessage}", e)
             GoogleSignInResult(
                 success = false,
+                idToken = null,
                 error = "Credential error: ${e.errorMessage ?: e.message}"
             )
         } catch (e: Exception) {
             Log.e("GoogleAuthService", "Unknown error", e)
             GoogleSignInResult(
                 success = false,
+                idToken = null,
                 error = e.message ?: "Unknown error occurred"
             )
         }
@@ -132,11 +141,13 @@ actual class GoogleAuthService(private val context: Context) {
 
     actual fun getCurrentUser(): GoogleSignInResult? {
         val user = auth.currentUser ?: return null
+        // Note: idToken is not available here, would need to call user.getIdToken(false).await()
         return GoogleSignInResult(
             success = true,
             userId = user.uid,
             email = user.email,
-            displayName = user.displayName
+            displayName = user.displayName,
+            idToken = null  // Not available in getCurrentUser
         )
     }
 

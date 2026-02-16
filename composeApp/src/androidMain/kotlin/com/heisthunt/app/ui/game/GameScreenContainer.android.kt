@@ -26,7 +26,13 @@ actual fun GameScreenContainer(
     val context = LocalContext.current
     val locationService = remember { LocationService(context) }
 
-    val viewModel: GameViewModel = viewModel {
+    // Create unique key to force new ViewModel creation for each game
+    val viewModelKey = remember(gameId, myRole, startTime) {
+        "$gameId-$myRole-${startTime?.toEpochMilliseconds() ?: System.currentTimeMillis()}"
+    }
+
+    val viewModel: GameViewModel = viewModel(key = viewModelKey) {
+        println("🎮 [Android] Creating NEW GameViewModel with key: $viewModelKey")
         AppModule.provideGameViewModel(
             gameId = gameId,
             myRole = myRole,
@@ -78,8 +84,9 @@ actual fun GameScreenContainer(
     val myNickname = "Player" // Placeholder
 
     // Render the actual game screen
-    // Use uiState.myRole if available (more reliable), fallback to parameter myRole
-    val actualRole = uiState.myRole ?: myRole
+    // IMPORTANT: Use parameter myRole (from navigation), NOT uiState.myRole
+    // uiState.myRole might contain old data if ViewModel wasn't cleared properly
+    val actualRole = myRole
 
     GameScreen(
         gameId = gameId,
