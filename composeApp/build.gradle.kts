@@ -136,6 +136,9 @@ android {
         // Add Maps API Key to manifest placeholders
         val mapsApiKey = localProperties.getProperty("MAPS_API_KEY") ?: "YOUR_GOOGLE_MAPS_API_KEY_HERE"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+
+        // Test instrumentation runner
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     packaging {
         resources {
@@ -155,6 +158,12 @@ android {
 
 dependencies {
     debugImplementation(compose.uiTooling)
+
+    // Android UI Testing
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.6.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.6.0")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
 
 compose.desktop {

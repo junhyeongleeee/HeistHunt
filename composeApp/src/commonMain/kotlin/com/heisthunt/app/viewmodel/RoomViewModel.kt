@@ -338,11 +338,17 @@ class RoomViewModel(
 
             roomRepository.startGame(roomId)
                 .onSuccess { response ->
+                    println("🎮 [RoomViewModel] startGame API success")
+                    println("  gameId: ${response.gameId}")
+                    println("  yourRole: ${response.yourRole}")
+                    println("  startedAt: ${response.startedAt}")
+
                     _detailState.value = _detailState.value.copy(
                         isLoading = false,
                         shouldNavigateToGame = true,
                         gameId = response.gameId,
-                        myRole = response.yourRole
+                        myRole = response.yourRole,
+                        gameStartTime = response.startedAt
                     )
                 }
                 .onFailure { exception ->

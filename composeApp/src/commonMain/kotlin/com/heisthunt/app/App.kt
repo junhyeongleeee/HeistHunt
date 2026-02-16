@@ -96,14 +96,22 @@ fun App(
                             authViewModel.login(email, password)
                         },
                         onGoogleLogin = {
+                            println("🔵 [App.kt] Google Login button clicked")
                             onGoogleLogin?.let {
+                                println("🔵 [App.kt] Launching coroutine for Google login")
                                 scope.launch {
+                                    println("🔵 [App.kt] Calling onGoogleLogin suspend function")
                                     val success = it()
+                                    println("🔵 [App.kt] onGoogleLogin returned: $success")
                                     if (success) {
-                                        // Navigate to Operation screen
+                                        println("✅ [App.kt] Navigating to Operation screen")
                                         currentScreen = Screen.Operation
+                                    } else {
+                                        println("❌ [App.kt] Login failed, staying on Login screen")
                                     }
                                 }
+                            } ?: run {
+                                println("❌ [App.kt] onGoogleLogin callback is null!")
                             }
                         },
                         onNavigateToRegister = {
