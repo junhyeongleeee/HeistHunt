@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.heisthunt.app.di.AppModule
 import com.heisthunt.app.location.LocationService
 import com.heisthunt.app.location.RequestLocationPermission
+import com.heisthunt.app.utils.HapticFeedback
 import com.heisthunt.app.viewmodel.GameViewModel
 import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.models.Room
@@ -21,10 +22,12 @@ actual fun GameScreenContainer(
     startTime: kotlinx.datetime.Instant?,
     escapeDurationSeconds: Long,
     totalDurationSeconds: Long,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onGameEnded: (com.heisthunt.shared.dto.GameResultResponse) -> Unit
 ) {
     val context = LocalContext.current
     val locationService = remember { LocationService(context) }
+    val hapticFeedback = remember { HapticFeedback(context) }
 
     // Create unique key to force new ViewModel creation for each game
     val viewModelKey = remember(gameId, myRole, startTime) {
@@ -37,6 +40,7 @@ actual fun GameScreenContainer(
             gameId = gameId,
             myRole = myRole,
             locationService = locationService,
+            hapticFeedback = hapticFeedback,
             startTime = startTime,
             escapeDurationSeconds = escapeDurationSeconds,
             totalDurationSeconds = totalDurationSeconds
@@ -44,6 +48,16 @@ actual fun GameScreenContainer(
     }
 
     val uiState by viewModel.uiState.collectAsState()
+
+    // Navigate to result screen when game ends
+    LaunchedEffect(uiState.isGameEnded, uiState.gameResult) {
+        if (uiState.isGameEnded) {
+            uiState.gameResult?.let { result ->
+                println("🏁 [Android] Game ended, navigating to result screen")
+                onGameEnded(result)
+            }
+        }
+    }
 
     var permissionGranted by remember { mutableStateOf(false) }
 

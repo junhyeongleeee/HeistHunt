@@ -6,6 +6,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import com.heisthunt.app.di.AppModule
 import com.heisthunt.app.location.LocationService
+import com.heisthunt.app.utils.HapticFeedback
 import com.heisthunt.app.viewmodel.GameViewModel
 import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.models.Room
@@ -19,9 +20,11 @@ actual fun GameScreenContainer(
     startTime: kotlinx.datetime.Instant?,
     escapeDurationSeconds: Long,
     totalDurationSeconds: Long,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onGameEnded: (com.heisthunt.shared.dto.GameResultResponse) -> Unit
 ) {
     val locationService = remember { LocationService() }
+    val hapticFeedback = remember { HapticFeedback() }
 
     // Create unique key to force new ViewModel creation for each game
     // IMPORTANT: Don't cache ViewModel - create new one for each game
@@ -46,6 +49,7 @@ actual fun GameScreenContainer(
             gameId = gameId,
             myRole = myRole,
             locationService = locationService,
+            hapticFeedback = hapticFeedback,
             startTime = startTime,
             escapeDurationSeconds = escapeDurationSeconds,
             totalDurationSeconds = totalDurationSeconds
@@ -61,6 +65,16 @@ actual fun GameScreenContainer(
         println("  localRemainingSeconds: ${uiState.localRemainingSeconds}")
         println("  localEscapeRemainingSeconds: ${uiState.localEscapeRemainingSeconds}")
         println("  startTime: ${uiState.startTime}")
+    }
+
+    // Navigate to result screen when game ends
+    LaunchedEffect(uiState.isGameEnded, uiState.gameResult) {
+        if (uiState.isGameEnded) {
+            uiState.gameResult?.let { result ->
+                println("🏁 [iOS] Game ended, navigating to result screen")
+                onGameEnded(result)
+            }
+        }
     }
 
     var permissionGranted by remember { mutableStateOf(false) }

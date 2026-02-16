@@ -70,4 +70,27 @@ class GameRepository(private val apiClient: ApiClient) {
             Result.failure(e)
         }
     }
+
+    suspend fun getGameResult(gameId: String): Result<com.heisthunt.shared.dto.GameResultResponse> {
+        return try {
+            println("📡 [GameRepository] Calling GET /games/$gameId/result")
+            val response = apiClient.get<ApiResponse<com.heisthunt.shared.dto.GameResultResponse>>("/games/$gameId/result")
+            if (response.success) {
+                val data = response.data
+                if (data != null) {
+                    println("✅ [GameRepository] Game result received: winner=${data.winner}")
+                    Result.success(data)
+                } else {
+                    println("❌ [GameRepository] Game result data is null")
+                    Result.failure(Exception("Game result data is null"))
+                }
+            } else {
+                println("❌ [GameRepository] Failed to get game result: ${response.error?.message}")
+                Result.failure(Exception(response.error?.message ?: "Failed to get game result"))
+            }
+        } catch (e: Exception) {
+            println("❌ [GameRepository] Exception getting game result: ${e.message}")
+            Result.failure(e)
+        }
+    }
 }

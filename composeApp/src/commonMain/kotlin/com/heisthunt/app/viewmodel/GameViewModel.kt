@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.heisthunt.app.location.LocationService
 import com.heisthunt.app.network.GameWebSocketClient
 import com.heisthunt.app.repository.GameRepository
+import com.heisthunt.app.utils.HapticFeedback
 import com.heisthunt.shared.dto.GameStateResponse
 import com.heisthunt.shared.dto.WebSocketMessage
 import com.heisthunt.shared.models.GameWinner
@@ -14,6 +15,7 @@ import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.utils.GeoUtils
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 
 data class CatchRequestState(
     val policeUserId: String,
@@ -58,7 +60,9 @@ data class GameUiState(
     val localEscapeRemainingSeconds: Long = 300L,
     // Phase-based alerts
     val policeViolation: PoliceViolationState? = null, // For thief in ESCAPE: police left jail
-    val nearbyEnemies: ProximityAlertState? = null // For both in CHASE: enemies within 5m
+    val nearbyEnemies: ProximityAlertState? = null, // For both in CHASE: enemies within 5m
+    // Game result
+    val gameResult: com.heisthunt.shared.dto.GameResultResponse? = null
 )
 
 class GameViewModel(
@@ -67,10 +71,14 @@ class GameViewModel(
     private val myRole: PlayerRole,
     private val locationService: LocationService,
     private val wsClient: GameWebSocketClient,
+    private val hapticFeedback: HapticFeedback,
     private val startTime: kotlinx.datetime.Instant?,
     private val escapeDurationSeconds: Long,
     private val totalDurationSeconds: Long
 ) : ViewModel() {
+
+    // Vibration throttling (3초 간격)
+    private var lastVibrationTime = 0L
 
     private val _uiState = MutableStateFlow(
         GameUiState(
@@ -82,6 +90,17 @@ class GameViewModel(
         )
     )
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
+
+    private fun shouldVibrate(): Boolean {
+        val now = Clock.System.now().toEpochMilliseconds()
+        return if (now - lastVibrationTime >= 3000) {
+            lastVibrationTime = now
+            true
+        } else {
+            println("🔇 [HapticFeedback] Vibration throttled (last: ${now - lastVibrationTime}ms ago)")
+            false
+        }
+    }
 
     init {
         println("🎮 GameViewModel initialized: gameId=$gameId, myRole=$myRole")
@@ -179,6 +198,9 @@ class GameViewModel(
                         )
                     )
                 }
+                if (shouldVibrate()) {
+                    hapticFeedback.medium()
+                }
             }
             is WebSocketMessage.CatchConfirmed -> {
                 // All players receive confirmation that a thief was caught
@@ -222,15 +244,43 @@ class GameViewModel(
                 loadGameStatus()
             }
             is WebSocketMessage.GameEnded -> {
-                println("Game ended, winner: ${event.winner}")
-                _uiState.update {
-                    it.copy(
-                        isGameEnded = true,
-                        winner = event.winner,
-                        error = "Game Over! ${event.winner.name} wins!"
-                    )
-                }
+                println("🏁 [GameViewModel] Game ended, winner: ${event.winner}")
+
+                // Stop location tracking immediately
                 stopLocationTracking()
+
+                // Fetch game result from server
+                viewModelScope.launch {
+                    println("📡 [GameViewModel] Fetching game result for gameId=$gameId")
+                    gameRepository.getGameResult(gameId).onSuccess { result ->
+                        println("✅ [GameViewModel] Game result received:")
+                        println("   Winner: ${result.winner}")
+                        println("   Duration: ${result.duration}s")
+                        println("   Players: ${result.players.size}")
+
+                        _uiState.update {
+                            it.copy(
+                                isGameEnded = true,
+                                winner = event.winner,
+                                gameResult = result
+                            )
+                        }
+                    }.onFailure { error ->
+                        println("❌ [GameViewModel] Failed to fetch game result: ${error.message}")
+                        // Still mark game as ended even if we fail to fetch result
+                        _uiState.update {
+                            it.copy(
+                                isGameEnded = true,
+                                winner = event.winner,
+                                error = "Game ended: ${event.winner.name} wins!"
+                            )
+                        }
+                    }
+                }
+
+                if (shouldVibrate()) {
+                    hapticFeedback.heavy()
+                }
             }
             is WebSocketMessage.Error -> {
                 println("WebSocket error: ${event.message}")
@@ -246,6 +296,9 @@ class GameViewModel(
                             timestamp = kotlinx.datetime.Clock.System.now()
                         )
                     )
+                }
+                if (shouldVibrate()) {
+                    hapticFeedback.warning()
                 }
                 // 5초 후 자동 제거
                 viewModelScope.launch {
@@ -286,6 +339,14 @@ class GameViewModel(
         val previousCount = currentState.nearbyThieves.size
         if (nearby.size != previousCount) {
             println("Nearby thieves: ${nearby.size}")
+
+            // Vibrate on first detection only
+            if (nearby.isNotEmpty() && previousCount == 0) {
+                if (shouldVibrate()) {
+                    hapticFeedback.light()
+                }
+            }
+
             _uiState.update {
                 it.copy(
                     nearbyThieves = nearby,
@@ -327,6 +388,14 @@ class GameViewModel(
         val previousCount = currentState.nearbyEnemies?.count ?: 0
         if (nearby.size != previousCount) {
             println("Nearby police: ${nearby.size}")
+
+            // Vibrate on first detection only
+            if (nearby.isNotEmpty() && previousCount == 0) {
+                if (shouldVibrate()) {
+                    hapticFeedback.light()
+                }
+            }
+
             _uiState.update {
                 it.copy(
                     nearbyEnemies = if (nearby.isNotEmpty()) {
@@ -446,6 +515,9 @@ class GameViewModel(
                         catchRequest = null,
                         error = "체포당했습니다! 감옥으로 돌아가세요."
                     )
+                }
+                if (shouldVibrate()) {
+                    hapticFeedback.heavy()
                 }
                 println("Thief $thiefUserId confirmed caught, jail: ${jailLoc.latitude}, ${jailLoc.longitude}")
             } else {

@@ -13,6 +13,7 @@ import com.heisthunt.app.ui.auth.RegisterScreen
 import com.heisthunt.app.ui.debug.DebugSettingsScreen
 import com.heisthunt.app.ui.game.GameScreenContainer
 import com.heisthunt.app.ui.game.OperationScreen
+import com.heisthunt.app.ui.game.ResultScreen
 import com.heisthunt.app.viewmodel.AuthViewModel
 import com.heisthunt.app.viewmodel.RoomViewModel
 import kotlin.onSuccess
@@ -22,6 +23,7 @@ enum class Screen {
     Register,
     Operation,
     Game,
+    Result,
     DebugSettings
 }
 
@@ -37,6 +39,7 @@ fun App(
     val roomDetailState by roomViewModel.detailState.collectAsState()
 
     var currentScreen by remember { mutableStateOf(Screen.Login) }
+    var gameResult by remember { mutableStateOf<com.heisthunt.shared.dto.GameResultResponse?>(null) }
 
     // Auto-login and game rejoin logic
     // IMPORTANT: This only runs once when user logs in, not on every auth state change
@@ -174,7 +177,32 @@ fun App(
                             onBack = {
                                 currentScreen = Screen.Operation
                                 roomViewModel.clearRoom()
+                            },
+                            onGameEnded = { result ->
+                                println("🏁 [App.kt] Game ended, navigating to Result screen")
+                                gameResult = result
+                                currentScreen = Screen.Result
                             }
+                        )
+                    }
+                }
+
+                Screen.Result -> {
+                    gameResult?.let { result ->
+                        ResultScreen(
+                            result = result,
+                            onBackToLobby = {
+                                println("🔙 [App.kt] Returning to Operation Center from Result screen")
+                                gameResult = null
+                                currentScreen = Screen.Operation
+                                roomViewModel.clearRoom()
+                            }
+                        )
+                    } ?: run {
+                        // Fallback if no result available
+                        Text(
+                            text = "게임 결과를 불러오는 중...",
+                            color = MaterialTheme.colorScheme.onBackground
                         )
                     }
                 }

@@ -12,5 +12,6 @@ expect fun GameScreenContainer(
     startTime: kotlinx.datetime.Instant?,
     escapeDurationSeconds: Long,
     totalDurationSeconds: Long,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onGameEnded: (com.heisthunt.shared.dto.GameResultResponse) -> Unit
 )
