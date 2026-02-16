@@ -8,6 +8,7 @@ import com.heisthunt.app.repository.AuthRepository
 import com.heisthunt.app.repository.GameRepository
 import com.heisthunt.app.repository.RoomRepository
 import com.heisthunt.app.storage.SecureStorage
+import com.heisthunt.app.utils.HapticFeedback
 import com.heisthunt.app.viewmodel.AuthViewModel
 import com.heisthunt.app.viewmodel.GameViewModel
 import com.heisthunt.app.viewmodel.RoomViewModel
@@ -61,6 +62,7 @@ object AppModule {
         gameId: String,
         myRole: PlayerRole,
         locationService: LocationService,
+        hapticFeedback: HapticFeedback,
         startTime: kotlinx.datetime.Instant?,
         escapeDurationSeconds: Long,
         totalDurationSeconds: Long
@@ -76,6 +78,7 @@ object AppModule {
             myRole = myRole,
             locationService = locationService,
             wsClient = wsClient,
+            hapticFeedback = hapticFeedback,
             startTime = startTime,
             escapeDurationSeconds = escapeDurationSeconds,
             totalDurationSeconds = totalDurationSeconds
