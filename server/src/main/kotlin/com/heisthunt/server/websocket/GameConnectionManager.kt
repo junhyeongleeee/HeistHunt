@@ -7,6 +7,7 @@ import com.heisthunt.shared.models.PlayerLocation
 import com.heisthunt.shared.models.PlayerRole
 import io.ktor.websocket.*
 import io.ktor.server.websocket.WebSocketServerSession
+import kotlinx.coroutines.Job
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.selectAll
@@ -22,6 +23,9 @@ object GameConnectionManager {
 
     // gameId -> userId -> PlayerRole (cache for player roles)
     private val playerRoles = ConcurrentHashMap<String, ConcurrentHashMap<String, PlayerRole>>()
+
+    // gameId -> Job (timer jobs for game timeout)
+    private val gameTimerJobs = ConcurrentHashMap<String, Job>()
 
     fun addConnection(gameId: String, userId: String, session: WebSocketServerSession, role: PlayerRole) {
         connections.getOrPut(gameId) { ConcurrentHashMap() }[userId] = session
@@ -40,7 +44,19 @@ object GameConnectionManager {
             connections.remove(gameId)
             lastKnownLocations.remove(gameId)
             playerRoles.remove(gameId)
+            cancelGameTimer(gameId)
         }
+    }
+
+    fun registerGameTimer(gameId: String, job: Job) {
+        gameTimerJobs[gameId] = job
+        println("⏰ [GameTimer] Timer registered for game $gameId")
+    }
+
+    fun cancelGameTimer(gameId: String) {
+        gameTimerJobs[gameId]?.cancel()
+        gameTimerJobs.remove(gameId)
+        println("⏰ [GameTimer] Timer cancelled for game $gameId")
     }
 
     fun updateLocation(gameId: String, userId: String, location: Location) {

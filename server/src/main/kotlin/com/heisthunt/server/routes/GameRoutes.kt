@@ -64,6 +64,7 @@ fun Route.gameRoutes() {
                     // Get room settings
                     val room = Rooms.selectAll().where { Rooms.id eq roomId }.singleOrNull()
                     val gameDurationMinutes = room?.get(Rooms.gameDurationMinutes) ?: 30
+                    val escapeDurationMinutes = room?.get(Rooms.escapeDurationMinutes) ?: 5
 
                     com.heisthunt.shared.dto.ActiveGameResponse(
                         gameId = gameId,
@@ -71,7 +72,7 @@ fun Route.gameRoutes() {
                         roomName = room?.get(Rooms.name) ?: "",
                         myRole = playerRole,
                         startTime = startTime,
-                        escapeDurationSeconds = 300L, // 5 minutes
+                        escapeDurationSeconds = escapeDurationMinutes * 60L,
                         totalDurationSeconds = gameDurationMinutes * 60L,
                         phase = phase
                     )
@@ -191,6 +192,12 @@ fun Route.gameRoutes() {
                         val startTime = result.response.startedAt
                         val totalDuration = result.response.durationMinutes * 60L
 
+                        // Get room settings for escape duration
+                        val escapeDurationSeconds = transaction {
+                            val room = Rooms.selectAll().where { Rooms.id eq roomId }.singleOrNull()
+                            (room?.get(Rooms.escapeDurationMinutes) ?: 5) * 60L
+                        }
+
                         // Get role assignments
                         val roleAssignments = transaction {
                             RoomParticipants.selectAll()
@@ -205,15 +212,16 @@ fun Route.gameRoutes() {
                             RoomEvent.GameStarted(
                                 gameId = gameId,
                                 startTime = startTime,
-                                escapeDurationSeconds = 300L, // 5 minutes
+                                escapeDurationSeconds = escapeDurationSeconds,
                                 totalDurationSeconds = totalDuration,
                                 roleAssignments = roleAssignments
                             )
                         )
 
-                        // 5분 후 ESCAPE -> CHASE 페이즈 전환
+                        // Dynamic phase transition based on escape duration
                         CoroutineScope(Dispatchers.IO).launch {
-                            delay(5 * 60 * 1000L) // 5분
+                            val escapeDurationMillis = escapeDurationSeconds * 1000L
+                            delay(escapeDurationMillis)
 
                             // 게임이 아직 진행중인지 확인
                             val isStillInProgress = transaction {
@@ -238,9 +246,51 @@ fun Route.gameRoutes() {
                                         message = "도망 시간 종료! 추격이 시작됩니다!"
                                     )
                                 )
-                                println("Game $gameId: Phase changed to CHASE")
+                                println("🏁 [GameTimer] Game $gameId: Phase changed to CHASE")
                             }
                         }
+
+                        // 전체 게임 타이머 시작 (도둑 승리 조건)
+                        val timerJob = CoroutineScope(Dispatchers.IO).launch {
+                            val totalDurationMillis = totalDuration * 1000L
+                            println("⏰ [GameTimer] Game $gameId started: will end in ${totalDuration}s")
+                            delay(totalDurationMillis)
+
+                            // 시간 만료 시 게임 상태 확인
+                            val gameStillActive = transaction {
+                                Games.selectAll()
+                                    .where { (Games.id eq gameId) and (Games.status eq "IN_PROGRESS") }
+                                    .singleOrNull()
+                                    ?.get(Games.status) == "IN_PROGRESS"
+                            }
+
+                            if (gameStillActive) {
+                                println("⏰ [GameTimer] Time expired for game $gameId - THIEF wins")
+
+                                // 도둑 승리 처리
+                                transaction {
+                                    Games.update({ Games.id eq gameId }) {
+                                        it[status] = "FINISHED"
+                                        it[winner] = "THIEF"
+                                        it[endedAt] = Clock.System.now()
+                                    }
+                                }
+
+                                // 모든 플레이어에게 게임 종료 브로드캐스트
+                                GameConnectionManager.broadcastMessage(
+                                    gameId,
+                                    WebSocketMessage.GameEnded(com.heisthunt.shared.models.GameWinner.THIEF)
+                                )
+
+                                println("🏁 [GameTimer] Game $gameId ended: Time expired, THIEF wins")
+                                GameConnectionManager.cancelGameTimer(gameId)
+                            } else {
+                                println("⏰ [GameTimer] Game $gameId already ended, timer cancelled")
+                            }
+                        }
+
+                        // 타이머 Job 등록 (게임 종료 시 취소하기 위해)
+                        GameConnectionManager.registerGameTimer(gameId, timerJob)
 
                         call.respond(ApiResponse(success = true, data = result.response))
                     }
@@ -309,6 +359,55 @@ fun Route.gameRoutes() {
                 )
 
                 call.respond(ApiResponse(success = true, data = "Left game"))
+            }
+
+            // Get game result
+            get("/{gameId}/result") {
+                val gameId = call.parameters["gameId"] ?: return@get call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiResponse<Unit>(success = false, error = ErrorResponse(ErrorCodes.INTERNAL_ERROR, "Missing game ID"))
+                )
+
+                println("🏁 GET /games/$gameId/result")
+
+                val result = transaction {
+                    val game = Games.selectAll().where { Games.id eq gameId }.singleOrNull()
+                        ?: return@transaction null
+
+                    val players = (GamePlayers innerJoin Users)
+                        .selectAll()
+                        .where { GamePlayers.gameId eq gameId }
+                        .map { row ->
+                            com.heisthunt.shared.dto.PlayerResult(
+                                userId = row[GamePlayers.userId],
+                                nickname = row[Users.nickname],
+                                role = PlayerRole.valueOf(row[GamePlayers.role]),
+                                isCaught = row[GamePlayers.isCaught]
+                            )
+                        }
+
+                    val duration = game[Games.endedAt]?.let { endedAt ->
+                        (endedAt - game[Games.startedAt]).inWholeSeconds
+                    } ?: 0L
+
+                    com.heisthunt.shared.dto.GameResultResponse(
+                        gameId = gameId,
+                        winner = com.heisthunt.shared.models.GameWinner.valueOf(game[Games.winner] ?: "THIEF"),
+                        duration = duration,
+                        players = players
+                    )
+                }
+
+                if (result != null) {
+                    println("   ✅ Game result found: winner=${result.winner}, duration=${result.duration}s")
+                    call.respond(ApiResponse(success = true, data = result))
+                } else {
+                    println("   ❌ Game not found")
+                    call.respond(
+                        HttpStatusCode.NotFound,
+                        ApiResponse<Unit>(success = false, error = ErrorResponse(ErrorCodes.GAME_NOT_FOUND, "Game not found"))
+                    )
+                }
             }
 
             // Get game status
@@ -545,7 +644,10 @@ fun Route.gameRoutes() {
                                             gameId,
                                             WebSocketMessage.GameEnded(com.heisthunt.shared.models.GameWinner.POLICE)
                                         )
-                                        println("Game $gameId ended - POLICE wins (all thieves caught)")
+                                        println("🏁 [GameTimer] Game $gameId ended - POLICE wins (all thieves caught)")
+
+                                        // 타이머 취소 (경찰이 이겼으므로 도둑 승리 조건 불필요)
+                                        GameConnectionManager.cancelGameTimer(gameId)
                                     }
 
                                     // 모든 플레이어에게 체포 확정 알림
