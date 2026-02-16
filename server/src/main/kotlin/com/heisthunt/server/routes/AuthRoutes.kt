@@ -18,6 +18,39 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.*
+import kotlinx.serialization.json.*
+
+/**
+ * Decodes a Google ID Token (JWT) to extract the email address.
+ * Note: This is a simplified version for development.
+ * TODO: Add proper signature verification using Firebase Admin SDK in production.
+ */
+private fun decodeGoogleIdToken(idToken: String): String? {
+    return try {
+        // JWT format: header.payload.signature
+        val parts = idToken.split(".")
+        if (parts.size != 3) return null
+
+        // Decode the payload (base64url encoded)
+        val payload = parts[1]
+        // Add padding if needed for base64 decoding
+        val paddedPayload = when (payload.length % 4) {
+            2 -> payload + "=="
+            3 -> payload + "="
+            else -> payload
+        }
+
+        val decodedBytes = Base64.getUrlDecoder().decode(paddedPayload)
+        val jsonString = String(decodedBytes, Charsets.UTF_8)
+        val jsonObject = Json.parseToJsonElement(jsonString).jsonObject
+
+        // Extract email from the payload
+        jsonObject["email"]?.jsonPrimitive?.content
+    } catch (e: Exception) {
+        println("Error decoding ID token: ${e.message}")
+        null
+    }
+}
 
 fun Route.authRoutes() {
     val jwtConfig = JwtConfig.fromEnvironment(application.environment.config)
@@ -165,8 +198,23 @@ fun Route.authRoutes() {
             // For now, we'll trust the client and create/login user based on Google email
             // TODO: Add Firebase Admin SDK verification in production
 
-            // Extract email from ID token (simplified - in production, verify token first)
-            val email = request.idToken // Temporarily using idToken as email
+            // Decode Google ID token to extract email
+            val email = try {
+                decodeGoogleIdToken(request.idToken)
+                    ?: throw Exception("Failed to decode ID token")
+            } catch (e: Exception) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiResponse<Unit>(
+                        success = false,
+                        error = ErrorResponse(
+                            code = ErrorCodes.INVALID_TOKEN,
+                            message = "Invalid Google ID token"
+                        )
+                    )
+                )
+                return@post
+            }
 
             val result = transaction {
                 // Check if user exists
@@ -197,7 +245,17 @@ fun Route.authRoutes() {
                     // Create new user
                     userId = UUID.randomUUID().toString()
                     val now = Clock.System.now()
-                    val nickname = email.substringBefore("@")
+
+                    // Generate unique nickname
+                    var baseNickname = email.substringBefore("@")
+                    var nickname = baseNickname
+                    var counter = 1
+
+                    // Check if nickname already exists and append number if needed
+                    while (Users.selectAll().where { Users.nickname eq nickname }.count() > 0) {
+                        nickname = "${baseNickname}${counter}"
+                        counter++
+                    }
 
                     Users.insert {
                         it[id] = userId

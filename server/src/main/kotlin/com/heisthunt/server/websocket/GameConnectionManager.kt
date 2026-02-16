@@ -108,6 +108,26 @@ object GameConnectionManager {
         }
     }
 
+    suspend fun broadcastToRole(
+        gameId: String,
+        targetRole: PlayerRole,
+        message: WebSocketMessage
+    ) {
+        val json = Json.encodeToString(message)
+        connections[gameId]?.forEach { (userId, session) ->
+            val userRole = playerRoles[gameId]?.get(userId)
+            if (userRole == targetRole) {
+                try {
+                    session.send(Frame.Text(json))
+                    println("Broadcasted message to user $userId (role: $targetRole): ${message::class.simpleName}")
+                } catch (e: Exception) {
+                    println("Error broadcasting to user $userId: ${e.message}")
+                    removeConnection(gameId, userId)
+                }
+            }
+        }
+    }
+
     suspend fun sendToUser(gameId: String, userId: String, message: WebSocketMessage) {
         val session = connections[gameId]?.get(userId)
         if (session != null) {

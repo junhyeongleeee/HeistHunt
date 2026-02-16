@@ -7,6 +7,7 @@ import com.heisthunt.shared.dto.RoomEvent
 import com.heisthunt.shared.dto.StartGameResponse
 import com.heisthunt.shared.dto.WebSocketMessage
 import com.heisthunt.shared.models.PlayerRole
+import com.heisthunt.shared.utils.GeoUtils
 import com.heisthunt.server.database.*
 import com.heisthunt.server.websocket.GameConnectionManager
 import com.heisthunt.server.websocket.RoomConnectionManager
@@ -420,8 +421,8 @@ fun Route.gameRoutes() {
                             val message = Json.decodeFromString<WebSocketMessage>(text)
                             when (message) {
                                 is WebSocketMessage.LocationUpdate -> {
-                                    // Save to database
-                                    transaction {
+                                    // Save to database and check violations
+                                    val (currentPhase, playerData) = transaction {
                                         LocationUpdates.insert {
                                             it[id] = UUID.randomUUID().toString()
                                             it[LocationUpdates.gameId] = gameId
@@ -432,11 +433,18 @@ fun Route.gameRoutes() {
                                             it[timestamp] = message.location.timestamp
                                         }
 
-                                        // 처음 위치 업데이트 시 감옥 위치 저장 (도둑의 경우)
+                                        // Get current game phase
+                                        val phase = Games.selectAll()
+                                            .where { Games.id eq gameId }
+                                            .singleOrNull()
+                                            ?.get(Games.phase) ?: "ESCAPE"
+
+                                        // Get player data
                                         val player = GamePlayers.selectAll()
                                             .where { (GamePlayers.gameId eq gameId) and (GamePlayers.userId eq userId) }
                                             .singleOrNull()
 
+                                        // 처음 위치 업데이트 시 감옥 위치 저장 (도둑의 경우)
                                         if (player != null && player[GamePlayers.role] == "THIEF" &&
                                             player[GamePlayers.jailLatitude] == null) {
                                             GamePlayers.update({
@@ -445,7 +453,47 @@ fun Route.gameRoutes() {
                                                 it[jailLatitude] = message.location.latitude
                                                 it[jailLongitude] = message.location.longitude
                                             }
-                                            println("Jail location saved for thief $userId: ${message.location.latitude}, ${message.location.longitude}")
+                                            println("✅ Jail location saved for thief $userId: ${message.location.latitude}, ${message.location.longitude}")
+                                        }
+
+                                        // 처음 위치 업데이트 시 감옥 위치 저장 (경찰의 경우)
+                                        if (player != null && player[GamePlayers.role] == "POLICE" &&
+                                            player[GamePlayers.jailLatitude] == null) {
+                                            GamePlayers.update({
+                                                (GamePlayers.gameId eq gameId) and (GamePlayers.userId eq userId)
+                                            }) {
+                                                it[jailLatitude] = message.location.latitude
+                                                it[jailLongitude] = message.location.longitude
+                                            }
+                                            println("✅ Jail location saved for police $userId: ${message.location.latitude}, ${message.location.longitude}")
+                                        }
+
+                                        Pair(phase, player)
+                                    }
+
+                                    // ESCAPE 페이즈에서 경찰 이동 제한 확인
+                                    if (playerData != null && playerData[GamePlayers.role] == "POLICE" && currentPhase == "ESCAPE") {
+                                        val jailLat = playerData[GamePlayers.jailLatitude]
+                                        val jailLon = playerData[GamePlayers.jailLongitude]
+
+                                        if (jailLat != null && jailLon != null) {
+                                            val distance = GeoUtils.calculateDistance(
+                                                jailLat, jailLon,
+                                                message.location.latitude, message.location.longitude
+                                            )
+
+                                            // 1m 초과 시 도둑들에게만 알림
+                                            if (distance > 1.0) {
+                                                println("⚠️ Police $userId violated jail (${distance}m from jail)")
+                                                GameConnectionManager.broadcastToRole(
+                                                    gameId,
+                                                    PlayerRole.THIEF,
+                                                    WebSocketMessage.PoliceViolation(
+                                                        policeUserId = userId,
+                                                        distanceFromJail = distance
+                                                    )
+                                                )
+                                            }
                                         }
                                     }
 
