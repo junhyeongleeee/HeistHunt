@@ -35,6 +35,8 @@ fun GameScreen(
     room: Room?,
     onBack: () -> Unit,
     uiState: GameUiState?,
+    myUserId: String = "",
+    myNickname: String = "Player",
     onRequestCatch: (thiefUserId: String, policeUserId: String, policeNickname: String) -> Unit,
     onConfirmCatch: (thiefUserId: String, thiefNickname: String) -> Unit,
     onRejectCatch: (thiefUserId: String) -> Unit,
@@ -48,7 +50,14 @@ fun GameScreen(
     val timeLeft = uiState?.localRemainingSeconds?.toInt() ?: 300
     val escapeTimeLeft = uiState?.localEscapeRemainingSeconds?.toInt() ?: 300
     val totalGameTime = uiState?.totalDurationSeconds?.toInt() ?: 1200
-    val distanceFromCenter = 450 // TODO: Calculate from myLocation
+    val myLoc = uiState?.myLocation
+    val centerLoc = uiState?.policeJailLocation
+    val distanceFromCenter = if (myLoc != null && centerLoc != null) {
+        com.heisthunt.shared.utils.GeoUtils.calculateDistance(
+            myLoc.latitude, myLoc.longitude,
+            centerLoc.latitude, centerLoc.longitude
+        ).toInt()
+    } else 0
     val maxRadius = 500
     val gamePhase = uiState?.currentPhase ?: "ESCAPE"
     val remainingThieves = uiState?.gameStatus?.remainingThieves ?: 3
@@ -67,23 +76,6 @@ fun GameScreen(
                 .navigationBarsPadding()
                 .background(Color(0xFF020617)) // slate-950
         ) {
-            // DEBUG: Show role information
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.Red.copy(alpha = 0.8f))
-            ) {
-                Column(modifier = Modifier.padding(8.dp)) {
-                    Text("🐛 DEBUG INFO", color = Color.White, fontWeight = FontWeight.Bold)
-                    Text("Param myRole: $myRole", color = Color.White, fontSize = 12.sp)
-                    Text("UiState myRole: ${uiState?.myRole}", color = Color.White, fontSize = 12.sp)
-                    Text("Game Phase: $gamePhase", color = Color.White, fontSize = 12.sp)
-                    Text("Time Left: $timeLeft", color = Color.White, fontSize = 12.sp)
-                    Text("Escape Time: $escapeTimeLeft", color = Color.White, fontSize = 12.sp)
-                }
-            }
-
             // Status Bar (상단)
             StatusBar(
                 role = myRole,
@@ -93,17 +85,32 @@ fun GameScreen(
                 gamePhase = gamePhase,
                 distanceFromCenter = distanceFromCenter,
                 maxRadius = maxRadius,
+                escapeDurationSeconds = uiState?.escapeDurationSeconds ?: 300L,
                 onLeaveClick = { showLeaveDialog = true }
             )
 
             // Map Section (지도)
             Box(modifier = Modifier.weight(1f)) {
+                // 역할과 페이즈에 따라 표시할 플레이어 위치 필터링
+                // - ESCAPE + 도둑: 모든 유저 위치 (스펙: 도둑은 모든 위치 확인 가능)
+                // - ESCAPE + 경찰: 경찰끼리만 (같은 팀끼리 항상 공유)
+                // - CHASE + 도둑: 도둑끼리만 (스펙: 도둑은 도둑만 확인 가능)
+                // - CHASE + 경찰: 경찰끼리만 (스펙: 경찰은 경찰만 확인 가능)
+                val visiblePlayerLocations = (uiState?.playerLocations ?: emptyList()).filter { player ->
+                    when {
+                        myRole == PlayerRole.THIEF && gamePhase == "ESCAPE" -> true
+                        myRole == PlayerRole.THIEF -> player.role == PlayerRole.THIEF
+                        else -> player.role == PlayerRole.POLICE
+                    }
+                }
+                println("🗺️ [GameScreen] visiblePlayerLocations: ${visiblePlayerLocations.size} / ${uiState?.playerLocations?.size ?: 0} (role=$myRole, phase=$gamePhase)")
+
                 GameMapView(
                     myLocation = uiState?.myLocation,
-                    playerLocations = uiState?.playerLocations ?: emptyList(),
+                    playerLocations = visiblePlayerLocations,
                     myRole = myRole,
                     safeRadiusMeters = maxRadius.toDouble(),
-                    gameCenterLocation = uiState?.myLocation, // TODO: Get actual game center from server
+                    gameCenterLocation = uiState?.policeJailLocation,
                     disconnectedPlayerIds = uiState?.disconnectedPlayerIds ?: emptySet(),
                     modifier = Modifier.fillMaxSize()
                 )
@@ -148,6 +155,10 @@ fun GameScreen(
                 remainingThieves = remainingThieves,
                 totalThieves = totalThieves,
                 nearbyThieves = uiState?.nearbyThieves ?: emptyList(),
+                isCaught = uiState?.isCaught == true,
+                escapeDurationSeconds = uiState?.escapeDurationSeconds ?: 300L,
+                myPoliceId = myUserId,
+                myPoliceNickname = myNickname,
                 onRequestCatch = onRequestCatch
             )
         }
@@ -156,7 +167,7 @@ fun GameScreen(
         uiState?.catchRequest?.let { request ->
             CatchRequestDialog(
                 policeNickname = request.policeNickname,
-                onConfirm = { onConfirmCatch(request.thiefUserId, "Me") }, // TODO: Get my nickname
+                onConfirm = { onConfirmCatch(request.thiefUserId, myNickname) },
                 onReject = { onRejectCatch(request.thiefUserId) },
                 onDismiss = onDismissCatchRequest
             )
@@ -185,6 +196,7 @@ private fun StatusBar(
     gamePhase: String,
     distanceFromCenter: Int,
     maxRadius: Int,
+    escapeDurationSeconds: Long,
     onLeaveClick: () -> Unit
 ) {
     println("🎨 StatusBar rendering: role=$role")
@@ -354,7 +366,8 @@ private fun StatusBar(
 
             // Use escape timer during ESCAPE phase, total timer during CHASE
             val progress = if (gamePhase == "ESCAPE") {
-                (escapeTimeLeft.toFloat() / 300f).coerceIn(0f, 1f)
+                val escapeDurationFloat = escapeDurationSeconds.toFloat()
+                (escapeTimeLeft.toFloat() / escapeDurationFloat).coerceIn(0f, 1f)
             } else {
                 (timeLeft.toFloat() / totalGameTime.toFloat()).coerceIn(0f, 1f)
             }
@@ -881,6 +894,10 @@ private fun ActionFooter(
     remainingThieves: Int,
     totalThieves: Int,
     nearbyThieves: List<PlayerLocation>,
+    isCaught: Boolean,
+    escapeDurationSeconds: Long,
+    myPoliceId: String,
+    myPoliceNickname: String,
     onRequestCatch: (thiefUserId: String, policeUserId: String, policeNickname: String) -> Unit
 ) {
     var showCatchDialog by remember { mutableStateOf(false) }
@@ -949,7 +966,7 @@ private fun ActionFooter(
                 CatchTargetDialog(
                     nearbyThieves = nearbyThieves,
                     onSelectThief = { thiefUserId ->
-                        onRequestCatch(thiefUserId, "POLICE_ME", "Me") // TODO: Get actual police ID and nickname
+                        onRequestCatch(thiefUserId, myPoliceId, myPoliceNickname)
                         showCatchDialog = false
                     },
                     onDismiss = { showCatchDialog = false }
@@ -1013,11 +1030,11 @@ private fun ActionFooter(
                                 color = Color(0xFF64748B)
                             )
                             Text(
-                                text = "EVADING",
+                                text = if (isCaught) "CAUGHT" else "EVADING",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Black,
                                 fontStyle = FontStyle.Italic,
-                                color = Color(0xFF22C55E) // green-500
+                                color = if (isCaught) Color(0xFFEF4444) else Color(0xFF22C55E)
                             )
                         }
                     }
@@ -1027,7 +1044,7 @@ private fun ActionFooter(
                 when (gamePhase) {
                     "ESCAPE" -> {
                         Text(
-                            text = "※ 도망 시간: 5분간 숨을 수 있습니다",
+                            text = "※ 도망 시간: ${escapeDurationSeconds / 60}분간 숨을 수 있습니다",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF22C55E), // green-500

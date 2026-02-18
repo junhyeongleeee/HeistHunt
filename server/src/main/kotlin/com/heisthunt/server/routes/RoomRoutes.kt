@@ -29,9 +29,14 @@ fun Route.roomRoutes() {
                 val request = call.receive<CreateRoomRequest>()
                 val now = Clock.System.now()
                 val roomId = UUID.randomUUID().toString()
-                val roomCode = generateRoomCode()
 
                 val room = transaction {
+                    // Retry until unique code is found (collision-safe)
+                    var roomCode: String
+                    do {
+                        roomCode = generateRoomCode()
+                    } while (Rooms.selectAll().where { Rooms.code eq roomCode }.count() > 0L)
+
                     Rooms.insert {
                         it[id] = roomId
                         it[code] = roomCode
