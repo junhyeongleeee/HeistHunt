@@ -36,18 +36,21 @@ actual fun GameMapView(
     val myLatLng = myLocation?.let { LatLng(it.latitude, it.longitude) } ?: defaultLocation
     val centerLatLng = gameCenterLocation?.let { LatLng(it.latitude, it.longitude) } ?: myLatLng
 
-    // Camera position state - follows user location
+    // Camera position state
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(myLatLng, 16f)
     }
 
-    // Update camera when location changes
+    // Only center camera on first location fix - user can freely pan after that
+    var initialLocationSet by remember { mutableStateOf(false) }
     LaunchedEffect(myLocation) {
-        myLocation?.let {
+        if (!initialLocationSet && myLocation != null) {
             cameraPositionState.position = CameraPosition.fromLatLngZoom(
-                LatLng(it.latitude, it.longitude),
-                cameraPositionState.position.zoom
+                LatLng(myLocation.latitude, myLocation.longitude),
+                16f
             )
+            initialLocationSet = true
+            println("🗺️ [Map] Initial camera position set to my location")
         }
     }
 
@@ -84,6 +87,18 @@ actual fun GameMapView(
                 )
             }
 
+            // Jail marker (police starting point)
+            gameCenterLocation?.let { jail ->
+                Marker(
+                    state = MarkerState(position = LatLng(jail.latitude, jail.longitude)),
+                    title = "JAIL",
+                    snippet = "경찰 시작 위치",
+                    icon = com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(
+                        com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_ORANGE
+                    )
+                )
+            }
+
             // My location marker (larger, distinctive)
             myLocation?.let { loc ->
                 val markerColor = when (myRole) {
@@ -112,16 +127,8 @@ actual fun GameMapView(
                 )
             }
 
-            // Other players' markers
+            // Other players' markers (server already excludes my own location)
             playerLocations.forEach { playerLocation ->
-                // Don't draw a marker for myself
-                if (myLocation?.let {
-                    playerLocation.location.latitude == it.latitude &&
-                    playerLocation.location.longitude == it.longitude
-                } == true) {
-                    return@forEach
-                }
-
                 val isDisconnected = disconnectedPlayerIds.contains(playerLocation.userId)
 
                 val markerColor = if (isDisconnected) {

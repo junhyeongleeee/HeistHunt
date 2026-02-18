@@ -10,6 +10,7 @@ import ComposeApp
     private var playerMarkers: [String: GMSMarker] = [:]
     private var safeCircle: GMSCircle?
     private var accuracyCircle: GMSCircle?
+    private var initialLocationSet = false
 
     private override init() {
         super.init()
@@ -27,6 +28,7 @@ import ComposeApp
         mapView.settings.rotateGestures = true
 
         self.mapView = mapView
+        self.initialLocationSet = false
         return mapView
     }
 
@@ -35,9 +37,13 @@ import ComposeApp
 
         let position = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
 
-        // Update camera to follow my location
-        let camera = GMSCameraPosition.camera(withTarget: position, zoom: mapView.camera.zoom)
-        mapView.camera = camera
+        // Only center camera on first location fix - user can freely pan after that
+        if !initialLocationSet {
+            let camera = GMSCameraPosition.camera(withTarget: position, zoom: 16.0)
+            mapView.camera = camera
+            initialLocationSet = true
+            print("🗺️ Initial camera position set to my location")
+        }
 
         // Remove old accuracy circle
         accuracyCircle?.map = nil
@@ -101,6 +107,23 @@ import ComposeApp
         circle.fillColor = UIColor(red: 0.937, green: 0.267, blue: 0.267, alpha: 0.1)
         circle.map = mapView
         safeCircle = circle
+    }
+
+    @objc public func updateJailMarker(latitude: Double, longitude: Double) {
+        guard let mapView = mapView else { return }
+        let position = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+
+        if let jailMarker = playerMarkers["__jail__"] {
+            jailMarker.position = position
+        } else {
+            let marker = GMSMarker()
+            marker.position = position
+            marker.title = "JAIL"
+            marker.snippet = "경찰 시작 위치"
+            marker.icon = GMSMarker.markerImage(with: UIColor.orange)
+            marker.map = mapView
+            playerMarkers["__jail__"] = marker
+        }
     }
 
     @objc public func clearPlayerMarker(userId: String) {

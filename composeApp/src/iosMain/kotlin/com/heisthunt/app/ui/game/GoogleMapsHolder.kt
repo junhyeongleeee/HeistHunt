@@ -14,6 +14,7 @@ object GoogleMapsHolder {
     var updateSafeCircleCallback: ((Double, Double, Double) -> Unit)? = null
     var clearPlayerMarkerCallback: ((String) -> Unit)? = null
     var clearAllMarkersCallback: (() -> Unit)? = null
+    var updateJailMarkerCallback: ((Double, Double) -> Unit)? = null
 
     fun createMapView(): UIView {
         return createMapViewCallback?.invoke()
@@ -44,5 +45,9 @@ object GoogleMapsHolder {
 
     fun clearAllMarkers() {
         clearAllMarkersCallback?.invoke()
+    }
+
+    fun updateJailMarker(latitude: Double, longitude: Double) {
+        updateJailMarkerCallback?.invoke(latitude, longitude)
     }
 }

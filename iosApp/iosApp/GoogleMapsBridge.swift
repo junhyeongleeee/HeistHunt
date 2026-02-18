@@ -80,6 +80,12 @@ import ComposeApp
             GoogleMapsViewWrapper.shared.clearAllMarkers()
         }
 
+        // Set update jail marker callback
+        GoogleMapsHolder.shared.updateJailMarkerCallback = { latitude, longitude in
+            print("🗺️ updateJailMarkerCallback: \(latitude), \(longitude)")
+            GoogleMapsViewWrapper.shared.updateJailMarker(latitude: latitude, longitude: longitude)
+        }
+
         print("✅ Google Maps callbacks registered successfully")
     }
 

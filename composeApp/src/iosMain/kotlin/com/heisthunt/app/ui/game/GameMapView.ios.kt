@@ -51,7 +51,7 @@ actual fun GameMapView(
                     )
                 }
 
-                // Update safe circle if available
+                // Update safe circle and jail marker if available
                 gameCenterLocation?.let { center ->
                     println("🗺️ Updating safe circle at: ${center.latitude}, ${center.longitude}, radius: $safeRadiusMeters")
                     GoogleMapsHolder.updateSafeCircle(
@@ -59,20 +59,15 @@ actual fun GameMapView(
                         longitude = center.longitude,
                         radiusMeters = safeRadiusMeters
                     )
+                    GoogleMapsHolder.updateJailMarker(
+                        latitude = center.latitude,
+                        longitude = center.longitude
+                    )
                 }
 
-                // Update other players' markers
+                // Update other players' markers (server already excludes my own location)
                 println("🗺️ Updating ${playerLocations.size} player markers")
                 playerLocations.forEach { player ->
-                    // Don't draw a marker for myself
-                    if (myLocation?.let {
-                        player.location.latitude == it.latitude &&
-                        player.location.longitude == it.longitude
-                    } == true) {
-                        println("🗺️ Skipping my own marker for ${player.userId}")
-                        return@forEach
-                    }
-
                     val isDisconnected = disconnectedPlayerIds.contains(player.userId)
 
                     val roleColor = if (isDisconnected) {
