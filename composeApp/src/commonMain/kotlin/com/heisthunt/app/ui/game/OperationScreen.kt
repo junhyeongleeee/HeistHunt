@@ -42,6 +42,7 @@ fun OperationScreen(
     roomViewModel: RoomViewModel,
     authViewModel: com.heisthunt.app.viewmodel.AuthViewModel,
     onNavigateToDebug: () -> Unit = {},
+    onGameEnded: (com.heisthunt.shared.dto.GameResultResponse) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var currentView by remember { mutableStateOf(OperationView.MAIN) }
@@ -151,10 +152,9 @@ fun OperationScreen(
                             currentView = OperationView.MAIN
                         },
                         onGameEnded = { result ->
-                            // TODO: Navigate to result screen (Phase 1.1 implementation)
-                            println("🏁 [OperationScreen] Game ended: winner=${result.winner}")
+                            println("🏁 [OperationScreen] Game ended: winner=${result.winner}, delegating to parent")
                             roomViewModel.clearRoom()
-                            currentView = OperationView.MAIN
+                            onGameEnded(result)
                         }
                     )
                 }

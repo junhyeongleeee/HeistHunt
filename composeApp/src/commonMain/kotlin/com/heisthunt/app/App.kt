@@ -143,6 +143,11 @@ fun App(
                         authViewModel = authViewModel,
                         onNavigateToDebug = {
                             currentScreen = Screen.DebugSettings
+                        },
+                        onGameEnded = { result ->
+                            println("🏁 [App.kt] Game ended via OperationScreen, navigating to Result screen")
+                            gameResult = result
+                            currentScreen = Screen.Result
                         }
                     )
                 }
@@ -191,6 +196,7 @@ fun App(
                     gameResult?.let { result ->
                         ResultScreen(
                             result = result,
+                            myUserId = AppModule.tokenStorage.userId ?: "",
                             onBackToLobby = {
                                 println("🔙 [App.kt] Returning to Operation Center from Result screen")
                                 gameResult = null
