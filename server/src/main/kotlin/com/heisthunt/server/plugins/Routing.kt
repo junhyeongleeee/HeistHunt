@@ -27,7 +27,7 @@ fun Application.configureRouting() {
             userRoutes()
             roomRoutes()
             roomWebSocketRoutes(jwtConfig)
-            gameRoutes()
+            gameRoutes(jwtConfig)
         }
     }
 }

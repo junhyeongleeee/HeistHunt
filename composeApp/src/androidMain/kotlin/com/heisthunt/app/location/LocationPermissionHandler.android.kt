@@ -2,6 +2,7 @@ package com.heisthunt.app.location
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -11,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 
 @Composable
 actual fun RequestLocationPermission(
@@ -36,7 +38,19 @@ actual fun RequestLocationPermission(
     }
 
     LaunchedEffect(Unit) {
-        if (!permissionsRequested) {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (fineGranted || coarseGranted) {
+            // 권한이 이미 허용된 경우 즉시 콜백 호출 (다이얼로그 없이)
+            println("📍 [Permission] Location permission already granted, starting tracking immediately")
+            onPermissionGranted()
+        } else if (!permissionsRequested) {
+            println("📍 [Permission] Requesting location permission")
             launcher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,

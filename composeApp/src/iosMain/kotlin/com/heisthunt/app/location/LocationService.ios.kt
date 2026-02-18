@@ -60,7 +60,7 @@ actual class LocationService {
 
         locationManager.delegate = locationDelegate
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.distanceFilter = 10.0 // Update every 10 meters
+        locationManager.distanceFilter = 2.0 // Update every 2 meters
 
         // Request permission
         locationManager.requestWhenInUseAuthorization()

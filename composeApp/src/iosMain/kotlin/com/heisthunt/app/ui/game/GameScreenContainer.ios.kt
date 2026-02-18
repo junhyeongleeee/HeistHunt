@@ -87,10 +87,11 @@ actual fun GameScreenContainer(
         viewModel.startLocationTracking()
     }
 
-    // Cleanup on dispose
+    // Cleanup on dispose - stop tracking AND disconnect WebSocket
     DisposableEffect(Unit) {
         onDispose {
             viewModel.stopLocationTracking()
+            viewModel.leaveGame() // Ensure WebSocket disconnects even without explicit back press
         }
     }
 
@@ -108,9 +109,8 @@ actual fun GameScreenContainer(
         )
     }
 
-    // TODO: Get actual user ID and nickname from auth state
-    val myUserId = "USER_${gameId.take(8)}" // Placeholder
-    val myNickname = "Player" // Placeholder
+    val myUserId = AppModule.tokenStorage.userId ?: ""
+    val myNickname = AppModule.tokenStorage.currentUser.value?.nickname ?: "Player"
 
     // Render the actual game screen
     // IMPORTANT: Use parameter myRole (from navigation), NOT uiState.myRole
@@ -131,6 +131,8 @@ actual fun GameScreenContainer(
         room = room,
         onBack = onBack,
         uiState = uiState,
+        myUserId = myUserId,
+        myNickname = myNickname,
         onRequestCatch = { thiefUserId, policeUserId, policeNickname ->
             viewModel.requestCatch(
                 thiefUserId = thiefUserId,
