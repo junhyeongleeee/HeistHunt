@@ -6,6 +6,7 @@ import io.ktor.client.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.http.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.Json
@@ -26,7 +27,19 @@ class GameWebSocketClient(
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+    private var shouldReconnect = false
+    private var reconnectAttempts = 0
+    private val maxReconnectAttempts = 5
+    private var currentGameId: String? = null
+
     suspend fun connect(gameId: String) {
+        currentGameId = gameId
+        shouldReconnect = true
+        reconnectAttempts = 0
+        connectInternal(gameId)
+    }
+
+    private suspend fun connectInternal(gameId: String) {
         if (session != null) {
             println("Game WebSocket already connected")
             return
@@ -53,6 +66,7 @@ class GameWebSocketClient(
             }
 
             _connectionState.value = ConnectionState.CONNECTED
+            reconnectAttempts = 0
             println("Game WebSocket connected successfully")
 
             // Listen for incoming messages
@@ -91,18 +105,44 @@ class GameWebSocketClient(
                     session = null
                     _connectionState.value = ConnectionState.DISCONNECTED
                     println("Game WebSocket disconnected")
+
+                    // Attempt reconnection with exponential backoff
+                    if (shouldReconnect && reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++
+                        val delayMs = (1000L * (1L shl reconnectAttempts)).coerceAtMost(30_000L)
+                        println("🔄 [WebSocket] Reconnecting in ${delayMs}ms (attempt $reconnectAttempts/$maxReconnectAttempts)")
+                        _connectionState.value = ConnectionState.RECONNECTING
+                        delay(delayMs)
+                        connectInternal(gameId)
+                    } else if (reconnectAttempts >= maxReconnectAttempts) {
+                        println("❌ [WebSocket] Max reconnect attempts reached, giving up")
+                        _connectionState.value = ConnectionState.ERROR
+                    }
                 }
             }
         } catch (e: Exception) {
             println("Error connecting to Game WebSocket: ${e.message}")
             e.printStackTrace()
             session = null
-            _connectionState.value = ConnectionState.ERROR
+
+            // Attempt reconnection on connection failure too
+            if (shouldReconnect && reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++
+                val delayMs = (1000L * (1L shl reconnectAttempts)).coerceAtMost(30_000L)
+                println("🔄 [WebSocket] Reconnecting after error in ${delayMs}ms (attempt $reconnectAttempts/$maxReconnectAttempts)")
+                _connectionState.value = ConnectionState.RECONNECTING
+                delay(delayMs)
+                connectInternal(gameId)
+            } else {
+                _connectionState.value = ConnectionState.ERROR
+            }
         }
     }
 
     suspend fun disconnect() {
         println("Disconnecting Game WebSocket...")
+        shouldReconnect = false
+        currentGameId = null
         session?.close()
         session = null
         _connectionState.value = ConnectionState.DISCONNECTED
@@ -170,6 +210,7 @@ class GameWebSocketClient(
         DISCONNECTED,
         CONNECTING,
         CONNECTED,
+        RECONNECTING,
         ERROR
     }
 }
