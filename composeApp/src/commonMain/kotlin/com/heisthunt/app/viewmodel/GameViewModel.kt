@@ -50,6 +50,7 @@ data class GameUiState(
     val nearbyThieves: List<PlayerLocation> = emptyList(), // For police: thieves within 5m
     val catchRequest: CatchRequestState? = null, // For thief: incoming catch request
     val jailLocation: Location? = null, // For caught thief: where to return
+    val policeJailLocation: Location? = null, // Police starting position (shown on map)
     val isCaught: Boolean = false, // If current player is caught
     // Local timer (hybrid approach)
     val startTime: kotlinx.datetime.Instant? = null,
@@ -168,10 +169,21 @@ class GameViewModel(
                     .map { it.userId }
                     .toSet()
 
+                // 도둑은 ESCAPE 페이즈에서 경찰의 첫 위치를 jail로 저장
+                val currentState = _uiState.value
+                val updatedJailLocation = if (myRole == PlayerRole.THIEF && currentState.policeJailLocation == null) {
+                    event.locations.firstOrNull { it.role == PlayerRole.POLICE }?.location?.also {
+                        println("🔒 [GameViewModel] Thief sees police jail location: ${it.latitude}, ${it.longitude}")
+                    }
+                } else {
+                    currentState.policeJailLocation
+                }
+
                 _uiState.update {
                     it.copy(
                         playerLocations = event.locations,
-                        disconnectedPlayerIds = disconnected
+                        disconnectedPlayerIds = disconnected,
+                        policeJailLocation = updatedJailLocation ?: it.policeJailLocation
                     )
                 }
                 // Calculate nearby enemies
@@ -306,6 +318,22 @@ class GameViewModel(
                     _uiState.update { it.copy(policeViolation = null) }
                 }
             }
+            is WebSocketMessage.EnemyProximityAlert -> {
+                println("🚨 [GameViewModel] EnemyProximityAlert: ${event.count} ${event.enemyRole.name} within 5m")
+                _uiState.update {
+                    it.copy(
+                        nearbyEnemies = if (event.count > 0) {
+                            ProximityAlertState(
+                                enemyRole = event.enemyRole,
+                                count = event.count
+                            )
+                        } else null
+                    )
+                }
+                if (event.count > 0 && (_uiState.value.nearbyEnemies?.count ?: 0) == 0) {
+                    if (shouldVibrate()) hapticFeedback.light()
+                }
+            }
             else -> {
                 println("Unhandled WebSocket event: ${event::class.simpleName}")
             }
@@ -423,10 +451,18 @@ class GameViewModel(
         }
 
         locationService.startLocationUpdates(
-            intervalMillis = 5000L,
+            intervalMillis = 1000L,
             onLocationUpdate = { location ->
                 println("Location updated: lat=${location.latitude}, lon=${location.longitude}")
-                _uiState.update { it.copy(myLocation = location, error = null) }
+                val currentState = _uiState.value
+                // 경찰의 첫 위치를 감옥(jail)으로 표시
+                val updatedJailLocation = if (myRole == PlayerRole.POLICE && currentState.policeJailLocation == null) {
+                    println("🔒 [GameViewModel] Police jail location set: ${location.latitude}, ${location.longitude}")
+                    location
+                } else {
+                    currentState.policeJailLocation
+                }
+                _uiState.update { it.copy(myLocation = location, policeJailLocation = updatedJailLocation, error = null) }
 
                 // Send location to server via WebSocket
                 viewModelScope.launch {

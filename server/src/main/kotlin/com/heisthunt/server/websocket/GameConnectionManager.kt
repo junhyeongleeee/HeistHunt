@@ -5,6 +5,7 @@ import com.heisthunt.shared.dto.WebSocketMessage
 import com.heisthunt.shared.models.Location
 import com.heisthunt.shared.models.PlayerLocation
 import com.heisthunt.shared.models.PlayerRole
+import com.heisthunt.shared.utils.GeoUtils
 import io.ktor.websocket.*
 import io.ktor.server.websocket.WebSocketServerSession
 import kotlinx.coroutines.Job
@@ -27,6 +28,15 @@ object GameConnectionManager {
     // gameId -> Job (timer jobs for game timeout)
     private val gameTimerJobs = ConcurrentHashMap<String, Job>()
 
+    // gameId -> Job (phase transition timer)
+    private val phaseTimerJobs = ConcurrentHashMap<String, Job>()
+
+    // gameId -> set of caught userId (excluded from location broadcasts)
+    private val caughtPlayers = ConcurrentHashMap<String, MutableSet<String>>()
+
+    // gameId -> current phase (cached to avoid DB queries per broadcast)
+    private val gamePhases = ConcurrentHashMap<String, String>()
+
     fun addConnection(gameId: String, userId: String, session: WebSocketServerSession, role: PlayerRole) {
         connections.getOrPut(gameId) { ConcurrentHashMap() }[userId] = session
         playerRoles.getOrPut(gameId) { ConcurrentHashMap() }[userId] = role
@@ -44,6 +54,8 @@ object GameConnectionManager {
             connections.remove(gameId)
             lastKnownLocations.remove(gameId)
             playerRoles.remove(gameId)
+            caughtPlayers.remove(gameId)
+            gamePhases.remove(gameId)
             cancelGameTimer(gameId)
         }
     }
@@ -53,10 +65,28 @@ object GameConnectionManager {
         println("⏰ [GameTimer] Timer registered for game $gameId")
     }
 
+    fun updateGamePhase(gameId: String, phase: String) {
+        gamePhases[gameId] = phase
+        println("🔄 [GameConnectionManager] Phase updated: gameId=$gameId, phase=$phase")
+    }
+
+    fun registerPhaseTimer(gameId: String, job: Job) {
+        phaseTimerJobs[gameId] = job
+        println("⏰ [PhaseTimer] Phase timer registered for game $gameId")
+    }
+
     fun cancelGameTimer(gameId: String) {
         gameTimerJobs[gameId]?.cancel()
         gameTimerJobs.remove(gameId)
-        println("⏰ [GameTimer] Timer cancelled for game $gameId")
+        phaseTimerJobs[gameId]?.cancel()
+        phaseTimerJobs.remove(gameId)
+        println("⏰ [GameTimer] All timers cancelled for game $gameId")
+    }
+
+    fun markPlayerCaught(gameId: String, userId: String) {
+        caughtPlayers.getOrPut(gameId) { ConcurrentHashMap.newKeySet() }.add(userId)
+        lastKnownLocations[gameId]?.remove(userId)
+        println("🔒 [GameConnectionManager] Player $userId marked as caught in game $gameId")
     }
 
     fun updateLocation(gameId: String, userId: String, location: Location) {
@@ -76,52 +106,53 @@ object GameConnectionManager {
         val senderRole = playerRoles[gameId]?.get(senderId) ?: return
         val allLocations = lastKnownLocations[gameId]?.values?.toList() ?: emptyList()
 
-        // Get current game phase from database
-        val currentPhase = transaction {
-            Games.selectAll().where { Games.id eq gameId }
-                .singleOrNull()
-                ?.get(Games.phase)
-        } ?: "ESCAPE"
+        // Use cached phase (updated on game start and phase transitions) - avoids DB query per broadcast
+        val currentPhase = gamePhases[gameId] ?: "ESCAPE"
 
+        val deadConnections = mutableListOf<String>()
         connections[gameId]?.forEach { (receiverId, session) ->
             try {
                 val receiverRole = playerRoles[gameId]?.get(receiverId) ?: return@forEach
 
                 // Filter locations based on receiver's role and game phase
+                // Always exclude: (1) receiver's own location, (2) caught thieves
+                val caughtSet = caughtPlayers[gameId] ?: emptySet()
                 val visibleLocations = if (currentPhase == "ESCAPE") {
-                    // ESCAPE phase: Everyone can see everyone
-                    allLocations
+                    // ESCAPE phase: Everyone can see everyone (except self and caught thieves)
+                    allLocations.filter { it.userId != receiverId && !caughtSet.contains(it.userId) }
                 } else {
-                    // CHASE phase: Use normal rules
+                    // CHASE phase: Same-role visibility only (spec: police see police, thief see thief)
                     when (receiverRole) {
-                        PlayerRole.POLICE -> allLocations // Police can see everyone
-                        PlayerRole.THIEF -> allLocations.filter { it.role == PlayerRole.THIEF } // Thieves only see other thieves
+                        PlayerRole.POLICE -> allLocations.filter { it.role == PlayerRole.POLICE && it.userId != receiverId }
+                        PlayerRole.THIEF -> allLocations.filter { it.role == PlayerRole.THIEF && it.userId != receiverId && !caughtSet.contains(it.userId) }
                     }
                 }
 
                 val message = WebSocketMessage.PlayerLocations(visibleLocations)
-                val json = Json.encodeToString(message)
+                val json = Json.encodeToString<WebSocketMessage>(message)
                 session.send(Frame.Text(json))
                 println("Broadcasted ${visibleLocations.size} locations to user $receiverId (role: $receiverRole, phase: $currentPhase)")
             } catch (e: Exception) {
                 println("Error broadcasting to user $receiverId: ${e.message}")
-                // Remove dead connection
-                removeConnection(gameId, receiverId)
+                deadConnections.add(receiverId)
             }
         }
+        deadConnections.forEach { removeConnection(gameId, it) }
     }
 
     suspend fun broadcastMessage(gameId: String, message: WebSocketMessage) {
         val json = Json.encodeToString(message)
+        val deadConnections = mutableListOf<String>()
         connections[gameId]?.forEach { (userId, session) ->
             try {
                 session.send(Frame.Text(json))
                 println("Broadcasted message to user $userId: ${message::class.simpleName}")
             } catch (e: Exception) {
                 println("Error broadcasting to user $userId: ${e.message}")
-                removeConnection(gameId, userId)
+                deadConnections.add(userId)
             }
         }
+        deadConnections.forEach { removeConnection(gameId, it) }
     }
 
     suspend fun broadcastToRole(
@@ -130,6 +161,7 @@ object GameConnectionManager {
         message: WebSocketMessage
     ) {
         val json = Json.encodeToString(message)
+        val deadConnections = mutableListOf<String>()
         connections[gameId]?.forEach { (userId, session) ->
             val userRole = playerRoles[gameId]?.get(userId)
             if (userRole == targetRole) {
@@ -138,10 +170,11 @@ object GameConnectionManager {
                     println("Broadcasted message to user $userId (role: $targetRole): ${message::class.simpleName}")
                 } catch (e: Exception) {
                     println("Error broadcasting to user $userId: ${e.message}")
-                    removeConnection(gameId, userId)
+                    deadConnections.add(userId)
                 }
             }
         }
+        deadConnections.forEach { removeConnection(gameId, it) }
     }
 
     suspend fun sendToUser(gameId: String, userId: String, message: WebSocketMessage) {
@@ -158,6 +191,32 @@ object GameConnectionManager {
         } else {
             println("User $userId not connected to game $gameId")
         }
+    }
+
+    // CHASE 페이즈에서 발신자와 5m 이내 적 감지 후 EnemyProximityAlert 전송
+    suspend fun sendProximityAlerts(gameId: String, senderId: String) {
+        val senderRole = playerRoles[gameId]?.get(senderId) ?: return
+        val senderLoc = lastKnownLocations[gameId]?.get(senderId)?.location ?: return
+        val caughtSet = caughtPlayers[gameId] ?: emptySet()
+
+        val enemyRole = if (senderRole == PlayerRole.POLICE) PlayerRole.THIEF else PlayerRole.POLICE
+
+        val nearbyCount = lastKnownLocations[gameId]?.values
+            ?.filter { it.role == enemyRole && !caughtSet.contains(it.userId) }
+            ?.count { enemy ->
+                GeoUtils.calculateDistance(
+                    senderLoc.latitude, senderLoc.longitude,
+                    enemy.location.latitude, enemy.location.longitude
+                ) <= 5.0
+            } ?: 0
+
+        println("🔍 [Proximity] gameId=$gameId, sender=$senderId (${senderRole.name}), nearbyEnemies=$nearbyCount")
+
+        // 항상 전송: 클라이언트가 0이면 alert 제거, 0 초과면 alert 표시
+        sendToUser(
+            gameId, senderId,
+            WebSocketMessage.EnemyProximityAlert(enemyRole = enemyRole, count = nearbyCount)
+        )
     }
 
     fun getConnectionCount(gameId: String): Int {

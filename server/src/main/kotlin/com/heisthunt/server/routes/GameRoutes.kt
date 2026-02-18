@@ -23,6 +23,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.auth0.jwt.JWT
+import com.auth0.jwt.algorithms.Algorithm
+import com.heisthunt.server.plugins.JwtConfig
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
@@ -30,7 +33,7 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.*
 
-fun Route.gameRoutes() {
+fun Route.gameRoutes(jwtConfig: JwtConfig) {
     route("/games") {
         authenticate("auth-jwt") {
             // Get user's active game
@@ -124,10 +127,18 @@ fun Route.gameRoutes() {
                         return@transaction StartGameResult.NotAllReady
                     }
 
-                    // Assign roles - respect selectedRole if set, otherwise random
-                    val policeIds = participants
+                    // Assign roles - respect selectedRole if set, otherwise assign random police
+                    var policeIds = participants
                         .filter { it[RoomParticipants.selectedRole] == PlayerRole.POLICE.name }
                         .map { it[RoomParticipants.userId] }
+
+                    // Guarantee at least 1 police - use policeRatio from room settings if none selected
+                    if (policeIds.isEmpty()) {
+                        val policeRatio = room[Rooms.policeRatio]
+                        val policeCount = (participants.size * policeRatio).toInt().coerceIn(1, participants.size - 1)
+                        policeIds = participants.shuffled().take(policeCount).map { it[RoomParticipants.userId] }
+                        println("⚠️ No one selected POLICE role - auto-assigning $policeCount police (ratio: $policeRatio)")
+                    }
 
                     println("🎭 Role Assignment Debug:")
                     participants.forEach { p ->
@@ -219,7 +230,7 @@ fun Route.gameRoutes() {
                         )
 
                         // Dynamic phase transition based on escape duration
-                        CoroutineScope(Dispatchers.IO).launch {
+                        val phaseTimerJob = CoroutineScope(Dispatchers.IO).launch {
                             val escapeDurationMillis = escapeDurationSeconds * 1000L
                             delay(escapeDurationMillis)
 
@@ -246,9 +257,11 @@ fun Route.gameRoutes() {
                                         message = "도망 시간 종료! 추격이 시작됩니다!"
                                     )
                                 )
+                                GameConnectionManager.updateGamePhase(gameId, "CHASE")
                                 println("🏁 [GameTimer] Game $gameId: Phase changed to CHASE")
                             }
                         }
+                        GameConnectionManager.registerPhaseTimer(gameId, phaseTimerJob)
 
                         // 전체 게임 타이머 시작 (도둑 승리 조건)
                         val timerJob = CoroutineScope(Dispatchers.IO).launch {
@@ -282,6 +295,8 @@ fun Route.gameRoutes() {
                                     WebSocketMessage.GameEnded(com.heisthunt.shared.models.GameWinner.THIEF)
                                 )
 
+                                // 위치 데이터 정리 (DB 무한 증가 방지)
+                                transaction { LocationUpdates.deleteWhere { LocationUpdates.gameId eq gameId } }
                                 println("🏁 [GameTimer] Game $gameId ended: Time expired, THIEF wins")
                                 GameConnectionManager.cancelGameTimer(gameId)
                             } else {
@@ -291,6 +306,9 @@ fun Route.gameRoutes() {
 
                         // 타이머 Job 등록 (게임 종료 시 취소하기 위해)
                         GameConnectionManager.registerGameTimer(gameId, timerJob)
+
+                        // 게임 시작 시 ESCAPE 페이즈로 캐시 초기화
+                        GameConnectionManager.updateGamePhase(gameId, "ESCAPE")
 
                         call.respond(ApiResponse(success = true, data = result.response))
                     }
@@ -326,7 +344,7 @@ fun Route.gameRoutes() {
 
                 println("🚪 User $userId leaving game $gameId")
 
-                transaction {
+                val policeShouldWin = transaction {
                     // Remove player from game
                     GamePlayers.deleteWhere {
                         (GamePlayers.gameId eq gameId) and (GamePlayers.userId eq userId)
@@ -346,7 +364,42 @@ fun Route.gameRoutes() {
                             it[endedAt] = Clock.System.now()
                         }
                         println("   Game ended - no players remaining")
+                        return@transaction false
                     }
+
+                    // Check if all remaining thieves are caught (police win condition)
+                    val gameInProgress = Games.selectAll()
+                        .where { (Games.id eq gameId) and (Games.status eq "IN_PROGRESS") }
+                        .singleOrNull() != null
+
+                    if (gameInProgress) {
+                        val uncaughtThieves = GamePlayers.selectAll()
+                            .where {
+                                (GamePlayers.gameId eq gameId) and
+                                (GamePlayers.role eq "THIEF") and
+                                (GamePlayers.isCaught eq false)
+                            }
+                            .count()
+                        println("   Uncaught thieves remaining: $uncaughtThieves")
+                        uncaughtThieves == 0L
+                    } else false
+                }
+
+                if (policeShouldWin) {
+                    transaction {
+                        Games.update({ Games.id eq gameId }) {
+                            it[status] = "FINISHED"
+                            it[winner] = "POLICE"
+                            it[endedAt] = Clock.System.now()
+                        }
+                    }
+                    GameConnectionManager.broadcastMessage(
+                        gameId,
+                        WebSocketMessage.GameEnded(com.heisthunt.shared.models.GameWinner.POLICE)
+                    )
+                    transaction { LocationUpdates.deleteWhere { LocationUpdates.gameId eq gameId } }
+                    GameConnectionManager.cancelGameTimer(gameId)
+                    println("🏁 All thieves caught/left - POLICE wins (game $gameId)")
                 }
 
                 // Disconnect from WebSocket
@@ -433,10 +486,11 @@ fun Route.gameRoutes() {
                     val elapsedSeconds = (now - startedAt).inWholeSeconds
                     val remainingSeconds = (durationSeconds - elapsedSeconds).coerceAtLeast(0)
 
-                    // Calculate escape time remaining (5 minutes = 300 seconds)
+                    // Calculate escape time remaining using actual room setting
                     val escapeTimeRemaining = if (game[Games.phase] == "ESCAPE") {
                         val escapeElapsed = (now - startedAt).inWholeSeconds
-                        (300L - escapeElapsed).coerceAtLeast(0)
+                        val escapeDurationSecs = room[Rooms.escapeDurationMinutes] * 60L
+                        (escapeDurationSecs - escapeElapsed).coerceAtLeast(0)
                     } else {
                         0L
                     }
@@ -483,11 +537,19 @@ fun Route.gameRoutes() {
                 return@webSocket
             }
 
-            // Extract userId from token (simplified - in production, verify JWT properly)
+            // Verify JWT signature and extract userId
             val userId = try {
-                com.auth0.jwt.JWT.decode(token).getClaim("userId").asString()
+                val verifier = JWT.require(Algorithm.HMAC256(jwtConfig.secret))
+                    .withAudience(jwtConfig.audience)
+                    .withIssuer(jwtConfig.issuer)
+                    .build()
+                val decodedJWT = verifier.verify(token)
+                decodedJWT.getClaim("userId").asString() ?: run {
+                    close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid token: missing userId claim"))
+                    return@webSocket
+                }
             } catch (e: Exception) {
-                println("Invalid token: ${e.message}")
+                println("❌ Invalid or tampered JWT token: ${e.message}")
                 close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid token"))
                 return@webSocket
             }
@@ -555,16 +617,26 @@ fun Route.gameRoutes() {
                                             println("✅ Jail location saved for thief $userId: ${message.location.latitude}, ${message.location.longitude}")
                                         }
 
-                                        // 처음 위치 업데이트 시 감옥 위치 저장 (경찰의 경우)
-                                        if (player != null && player[GamePlayers.role] == "POLICE" &&
-                                            player[GamePlayers.jailLatitude] == null) {
-                                            GamePlayers.update({
-                                                (GamePlayers.gameId eq gameId) and (GamePlayers.userId eq userId)
-                                            }) {
-                                                it[jailLatitude] = message.location.latitude
-                                                it[jailLongitude] = message.location.longitude
+                                        // 경찰 감옥 위치 저장/갱신
+                                        // GPS는 시작 후 30~60초간 정착하므로, 60초 동안 계속 갱신하여 정확한 위치 확보
+                                        if (player != null && player[GamePlayers.role] == "POLICE") {
+                                            val gameStartTime = Games.selectAll()
+                                                .where { Games.id eq gameId }
+                                                .singleOrNull()?.get(Games.startedAt)
+                                            val elapsedSeconds = gameStartTime?.let {
+                                                (Clock.System.now() - it).inWholeSeconds
+                                            } ?: 999L
+
+                                            val existingJailLat = player[GamePlayers.jailLatitude]
+                                            if (existingJailLat == null || elapsedSeconds < 60) {
+                                                GamePlayers.update({
+                                                    (GamePlayers.gameId eq gameId) and (GamePlayers.userId eq userId)
+                                                }) {
+                                                    it[jailLatitude] = message.location.latitude
+                                                    it[jailLongitude] = message.location.longitude
+                                                }
+                                                println("✅ Jail location updated for police $userId (elapsed: ${elapsedSeconds}s): ${message.location.latitude}, ${message.location.longitude}")
                                             }
-                                            println("✅ Jail location saved for police $userId: ${message.location.latitude}, ${message.location.longitude}")
                                         }
 
                                         Pair(phase, player)
@@ -581,9 +653,13 @@ fun Route.gameRoutes() {
                                                 message.location.latitude, message.location.longitude
                                             )
 
-                                            // 1m 초과 시 도둑들에게만 알림
-                                            if (distance > 1.0) {
-                                                println("⚠️ Police $userId violated jail (${distance}m from jail)")
+                                            // GPS accuracy를 고려한 이탈 판정
+                                            // 실내에서는 GPS 오차가 10~30m이므로 accuracy보다 멀어야 실제 이탈로 판정
+                                            // 최소 threshold는 15m (실내 GPS 오차 기본값)
+                                            val gpsAccuracy = message.location.accuracy?.toDouble() ?: 15.0
+                                            val threshold = maxOf(15.0, gpsAccuracy)
+                                            if (distance > threshold) {
+                                                println("⚠️ Police $userId violated jail (${distance}m from jail, gpsAccuracy=${gpsAccuracy}m, threshold=${threshold}m)")
                                                 GameConnectionManager.broadcastToRole(
                                                     gameId,
                                                     PlayerRole.THIEF,
@@ -599,6 +675,11 @@ fun Route.gameRoutes() {
                                     // Update cache and broadcast
                                     GameConnectionManager.updateLocation(gameId, userId, message.location)
                                     GameConnectionManager.broadcastLocations(gameId, userId)
+
+                                    // CHASE 페이즈: 근접 적 감지 후 개별 알림 전송
+                                    if (currentPhase == "CHASE") {
+                                        GameConnectionManager.sendProximityAlerts(gameId, userId)
+                                    }
                                 }
 
                                 is WebSocketMessage.CatchRequest -> {
@@ -611,6 +692,9 @@ fun Route.gameRoutes() {
                                 is WebSocketMessage.CatchConfirmed -> {
                                     // 도둑이 체포 확인
                                     println("Catch confirmed by thief $userId")
+
+                                    // 체포된 도둑을 위치 브로드캐스트에서 즉시 제외
+                                    GameConnectionManager.markPlayerCaught(gameId, userId)
 
                                     val allCaught = transaction {
                                         // 도둑 상태 업데이트
@@ -644,6 +728,8 @@ fun Route.gameRoutes() {
                                             gameId,
                                             WebSocketMessage.GameEnded(com.heisthunt.shared.models.GameWinner.POLICE)
                                         )
+                                        // 위치 데이터 정리
+                                        transaction { LocationUpdates.deleteWhere { LocationUpdates.gameId eq gameId } }
                                         println("🏁 [GameTimer] Game $gameId ended - POLICE wins (all thieves caught)")
 
                                         // 타이머 취소 (경찰이 이겼으므로 도둑 승리 조건 불필요)
