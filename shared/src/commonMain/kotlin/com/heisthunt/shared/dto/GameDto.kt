@@ -63,7 +63,8 @@ data class ActiveGameResponse(
     val startTime: Instant,
     val escapeDurationSeconds: Long,
     val totalDurationSeconds: Long,
-    val phase: String
+    val phase: String,
+    val participants: List<com.heisthunt.shared.models.Participant> = emptyList()
 )
 
 // WebSocket Messages
@@ -124,5 +125,34 @@ sealed class WebSocketMessage {
     data class EnemyProximityAlert(
         val enemyRole: PlayerRole,
         val count: Int
+    ) : WebSocketMessage()
+
+    // WebRTC signaling messages (relayed via Game WebSocket server)
+    @Serializable
+    data class RTCOffer(
+        val fromUserId: String,
+        val toUserId: String,
+        val sdp: String
+    ) : WebSocketMessage()
+
+    @Serializable
+    data class RTCAnswer(
+        val fromUserId: String,
+        val toUserId: String,
+        val sdp: String
+    ) : WebSocketMessage()
+
+    @Serializable
+    data class RTCIceCandidate(
+        val fromUserId: String,
+        val toUserId: String,
+        val sdp: String,
+        val sdpMLineIndex: Int,
+        val sdpMid: String? = null
+    ) : WebSocketMessage()
+
+    @Serializable
+    data class RTCPeerLeft(
+        val userId: String
     ) : WebSocketMessage()
 }

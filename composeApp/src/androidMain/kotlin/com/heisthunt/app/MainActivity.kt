@@ -8,9 +8,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.heisthunt.app.auth.AccountUtils
 import com.heisthunt.app.auth.GoogleAuthService
-import com.heisthunt.app.di.AppModule
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private lateinit var googleAuthService: GoogleAuthService
@@ -24,68 +21,25 @@ class MainActivity : ComponentActivity() {
         setContent {
             App(
                 onGoogleLogin = suspend {
-                    android.util.Log.d("MainActivity", "Google login started")
+                    android.util.Log.d("MainActivity", "Google Sign-In started")
                     val result = googleAuthService.signIn()
-                    android.util.Log.d("MainActivity", "Google login result: success=${result.success}, email=${result.email}, idToken=${result.idToken?.take(20)}..., error=${result.error}")
+                    android.util.Log.d("MainActivity", "Google Sign-In result: success=${result.success}, error=${result.error}")
                     if (result.success && result.idToken != null) {
-                        android.util.Log.d("MainActivity", "Calling backend with idToken for: ${result.email}")
-                        // Authenticate with backend server
-                        try {
-                            val authResult = withContext(Dispatchers.IO) {
-                                AppModule.authRepository.googleLogin(result.idToken)
-                            }
-
-                            authResult.fold(
-                                onSuccess = { user ->
-                                    Toast.makeText(
-                                        this,
-                                        "로그인 성공: ${user.nickname}",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                    true
-                                },
-                                onFailure = { error ->
-                                    android.util.Log.e("MainActivity", "Backend login failed: ${error.message}", error)
-                                    Toast.makeText(
-                                        this,
-                                        "서버 로그인 실패: ${error.message}",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    false
-                                }
-                            )
-                        } catch (e: Exception) {
-                            android.util.Log.e("MainActivity", "Backend connection error", e)
-                            Toast.makeText(
-                                this,
-                                "서버 연결 실패: ${e.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
-                            false
-                        }
+                        android.util.Log.d("MainActivity", "Google Sign-In success, returning idToken")
+                        result.idToken
                     } else {
-                        // Handle specific error cases
-                        android.util.Log.d("MainActivity", "Login failed or email is null. success=${result.success}, email=${result.email}, error=${result.error}")
                         when {
                             result.error?.contains("No Google account found") == true -> {
                                 showAddAccountDialog()
                             }
                             result.error?.contains("cancelled") == true -> {
-                                Toast.makeText(
-                                    this,
-                                    "로그인이 취소되었습니다",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                Toast.makeText(this, "로그인이 취소되었습니다", Toast.LENGTH_SHORT).show()
                             }
                             else -> {
-                                Toast.makeText(
-                                    this,
-                                    "로그인 실패: ${result.error}",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                Toast.makeText(this, "로그인 실패: ${result.error}", Toast.LENGTH_LONG).show()
                             }
                         }
-                        false
+                        null
                     }
                 }
             )

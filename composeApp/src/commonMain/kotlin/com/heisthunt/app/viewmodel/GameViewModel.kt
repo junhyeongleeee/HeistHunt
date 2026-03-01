@@ -6,10 +6,12 @@ import com.heisthunt.app.location.LocationService
 import com.heisthunt.app.network.GameWebSocketClient
 import com.heisthunt.app.repository.GameRepository
 import com.heisthunt.app.utils.HapticFeedback
+import com.heisthunt.app.voice.VoiceChannelManager
 import com.heisthunt.shared.dto.GameStateResponse
 import com.heisthunt.shared.dto.WebSocketMessage
 import com.heisthunt.shared.models.GameWinner
 import com.heisthunt.shared.models.Location
+import com.heisthunt.shared.models.Participant
 import com.heisthunt.shared.models.PlayerLocation
 import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.utils.GeoUtils
@@ -47,7 +49,8 @@ data class GameUiState(
     val isGameEnded: Boolean = false,
     val winner: GameWinner? = null,
     // Catch mechanism
-    val nearbyThieves: List<PlayerLocation> = emptyList(), // For police: thieves within 5m
+    val nearbyThieves: List<PlayerLocation> = emptyList(), // For police: thieves within 5m (legacy)
+    val catchableThieves: List<Participant> = emptyList(), // For police: all uncaught thieves
     val catchRequest: CatchRequestState? = null, // For thief: incoming catch request
     val jailLocation: Location? = null, // For caught thief: where to return
     val policeJailLocation: Location? = null, // Police starting position (shown on map)
@@ -70,12 +73,15 @@ class GameViewModel(
     private val gameRepository: GameRepository,
     private val gameId: String,
     private val myRole: PlayerRole,
+    private val participants: List<Participant>,
+    private val myUserId: String,
     private val locationService: LocationService,
     private val wsClient: GameWebSocketClient,
     private val hapticFeedback: HapticFeedback,
     private val startTime: kotlinx.datetime.Instant?,
     private val escapeDurationSeconds: Long,
-    private val totalDurationSeconds: Long
+    private val totalDurationSeconds: Long,
+    val voiceChannelManager: VoiceChannelManager? = null
 ) : ViewModel() {
 
     // Vibration throttling (3초 간격)
@@ -87,7 +93,8 @@ class GameViewModel(
             myRole = myRole,
             startTime = startTime,
             escapeDurationSeconds = escapeDurationSeconds,
-            totalDurationSeconds = totalDurationSeconds
+            totalDurationSeconds = totalDurationSeconds,
+            catchableThieves = participants.filter { it.role == PlayerRole.THIEF && !it.isCaught }
         )
     )
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
@@ -110,6 +117,9 @@ class GameViewModel(
         viewModelScope.launch {
             wsClient.connect(gameId)
         }
+
+        // Initialize voice channel for same-role teammates
+        joinVoiceChannel()
 
         // Observe WebSocket connection state
         viewModelScope.launch {
@@ -148,6 +158,33 @@ class GameViewModel(
                             localRemainingSeconds = totalRemaining,
                             localEscapeRemainingSeconds = escapeRemaining
                         )
+                    }
+
+                    // Timer reached 0 but no GameEnded WebSocket received (e.g. on rejoin or server restart)
+                    // Fetch game result to trigger end screen
+                    if (totalRemaining == 0L && !_uiState.value.isGameEnded) {
+                        println("⏰ [GameViewModel] Local timer expired, fetching game result (gameId=$gameId)")
+                        stopLocationTracking()
+                        gameRepository.getGameResult(gameId).onSuccess { result ->
+                            println("✅ [GameViewModel] Game result fetched after timer expiry: winner=${result.winner}")
+                            _uiState.update {
+                                it.copy(
+                                    isGameEnded = true,
+                                    winner = result.winner,
+                                    gameResult = result
+                                )
+                            }
+                        }.onFailure { error ->
+                            println("❌ [GameViewModel] Failed to fetch result after timer expiry: ${error.message}")
+                            // Mark ended anyway with THIEF win (time expired = thieves survive)
+                            _uiState.update {
+                                it.copy(
+                                    isGameEnded = true,
+                                    winner = com.heisthunt.shared.models.GameWinner.THIEF
+                                )
+                            }
+                        }
+                        break
                     }
 
                     // Update every second for smooth UI
@@ -216,18 +253,24 @@ class GameViewModel(
             }
             is WebSocketMessage.CatchConfirmed -> {
                 // All players receive confirmation that a thief was caught
-                println("Thief ${event.thiefNickname} confirmed caught, returning to jail")
+                println("✅ [GameViewModel] Thief ${event.thiefNickname} (${event.thiefUserId}) confirmed caught")
+                println("  myUserId: $myUserId, myRole: $myRole")
+                println("  Is me: ${event.thiefUserId == myUserId}")
+
+                // Remove caught thief from catchable list immediately
                 _uiState.update {
-                    it.copy(error = "${event.thiefNickname}가 체포되었습니다!")
+                    it.copy(
+                        error = "${event.thiefNickname}가 체포되었습니다!",
+                        catchableThieves = it.catchableThieves.filter { p -> p.userId != event.thiefUserId }
+                    )
                 }
 
-                // If I'm the caught thief, update my state
-                val currentState = _uiState.value
-                if (currentState.myRole == PlayerRole.THIEF) {
-                    // Check if it's me by comparing with my location or userId
-                    // For now, we'll set jail location for navigation
+                // Only update isCaught and jailLocation for the thief who was actually caught
+                if (myRole == PlayerRole.THIEF && event.thiefUserId == myUserId) {
+                    println("🎯 [GameViewModel] I was caught! Updating isCaught=true and jailLocation")
                     _uiState.update {
                         it.copy(
+                            isCaught = true,
                             jailLocation = Location(
                                 latitude = event.jailLatitude,
                                 longitude = event.jailLongitude,
@@ -333,6 +376,29 @@ class GameViewModel(
                 if (event.count > 0 && (_uiState.value.nearbyEnemies?.count ?: 0) == 0) {
                     if (shouldVibrate()) hapticFeedback.light()
                 }
+            }
+            is WebSocketMessage.RTCOffer -> {
+                println("📡 [Voice] Received RTCOffer from ${event.fromUserId}")
+                viewModelScope.launch {
+                    val answerSdp = voiceChannelManager?.handleOffer(event.fromUserId, event.sdp)
+                    if (answerSdp != null) {
+                        wsClient.sendRTCAnswer(myUserId, event.fromUserId, answerSdp)
+                    }
+                }
+            }
+            is WebSocketMessage.RTCAnswer -> {
+                println("📡 [Voice] Received RTCAnswer from ${event.fromUserId}")
+                viewModelScope.launch {
+                    voiceChannelManager?.handleAnswer(event.fromUserId, event.sdp)
+                }
+            }
+            is WebSocketMessage.RTCIceCandidate -> {
+                println("🧊 [Voice] Received RTCIceCandidate from ${event.fromUserId}")
+                voiceChannelManager?.addIceCandidate(event.fromUserId, event.sdp, event.sdpMLineIndex, event.sdpMid)
+            }
+            is WebSocketMessage.RTCPeerLeft -> {
+                println("🔌 [Voice] Peer left: ${event.userId}")
+                voiceChannelManager?.removePeer(event.userId)
             }
             else -> {
                 println("Unhandled WebSocket event: ${event::class.simpleName}")
@@ -501,7 +567,14 @@ class GameViewModel(
                         println("   - escapeTimeRemaining: ${status.escapeTimeRemaining}")
                         println("   - remainingThieves: ${status.remainingThieves}/${status.totalThieves}")
 
-                        _uiState.update { it.copy(gameStatus = status) }
+                        _uiState.update {
+                            it.copy(
+                                gameStatus = status,
+                                catchableThieves = participants.filter { p ->
+                                    p.role == PlayerRole.THIEF && p.userId !in status.caughtPlayers
+                                }
+                            )
+                        }
 
                         // UI state 업데이트 확인
                         val currentState = _uiState.value
@@ -599,6 +672,9 @@ class GameViewModel(
                     println("❌ Failed to leave game: ${error.message}")
                 }
 
+            // Disconnect voice channel
+            voiceChannelManager?.dispose()
+
             // Disconnect WebSocket
             wsClient.disconnect()
 
@@ -620,8 +696,37 @@ class GameViewModel(
     override fun onCleared() {
         super.onCleared()
         stopLocationTracking()
+        voiceChannelManager?.dispose()
         viewModelScope.launch {
             wsClient.disconnect()
+        }
+    }
+
+    private fun joinVoiceChannel() {
+        val vm = voiceChannelManager ?: return
+        println("🎙️ [Voice] Initializing voice channel: role=$myRole, myUserId=$myUserId")
+        vm.initialize(myUserId)
+
+        // ICE candidate callback → relay via WebSocket
+        vm.onLocalIceCandidate = { toUserId, sdp, sdpMLineIndex, sdpMid ->
+            viewModelScope.launch {
+                wsClient.sendRTCIceCandidate(myUserId, toUserId, sdp, sdpMLineIndex, sdpMid)
+            }
+        }
+
+        // Create offers for same-role teammates; lower userId initiates to avoid collision
+        val sameRoleTeammates = participants.filter { it.role == myRole && it.userId != myUserId }
+        sameRoleTeammates.forEach { teammate ->
+            vm.setPeerNickname(teammate.userId, teammate.nickname)
+            if (myUserId < teammate.userId) {
+                viewModelScope.launch {
+                    val sdp = vm.createOfferFor(teammate.userId)
+                    if (sdp != null) {
+                        wsClient.sendRTCOffer(myUserId, teammate.userId, sdp)
+                        println("📡 [Voice] Sent RTCOffer to ${teammate.userId}")
+                    }
+                }
+            }
         }
     }
 }

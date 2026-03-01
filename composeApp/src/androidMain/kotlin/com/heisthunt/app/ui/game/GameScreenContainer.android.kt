@@ -11,6 +11,7 @@ import com.heisthunt.app.location.LocationService
 import com.heisthunt.app.location.RequestLocationPermission
 import com.heisthunt.app.utils.HapticFeedback
 import com.heisthunt.app.viewmodel.GameViewModel
+import com.heisthunt.app.voice.VoiceChannelManager
 import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.models.Room
 
@@ -28,22 +29,30 @@ actual fun GameScreenContainer(
     val context = LocalContext.current
     val locationService = remember { LocationService(context) }
     val hapticFeedback = remember { HapticFeedback(context) }
+    val voiceChannelManager = remember { VoiceChannelManager(context) }
 
     // Create unique key to force new ViewModel creation for each game
     val viewModelKey = remember(gameId, myRole, startTime) {
         "$gameId-$myRole-${startTime?.toEpochMilliseconds() ?: System.currentTimeMillis()}"
     }
 
+    val myUserId = remember { AppModule.tokenStorage.userId ?: "" }
+
     val viewModel: GameViewModel = viewModel(key = viewModelKey) {
         println("🎮 [Android] Creating NEW GameViewModel with key: $viewModelKey")
+        println("  participants: ${room?.participants?.size ?: 0}")
+        println("  myUserId: $myUserId")
         AppModule.provideGameViewModel(
             gameId = gameId,
             myRole = myRole,
+            participants = room?.participants ?: emptyList(),
+            myUserId = myUserId,
             locationService = locationService,
             hapticFeedback = hapticFeedback,
             startTime = startTime,
             escapeDurationSeconds = escapeDurationSeconds,
-            totalDurationSeconds = totalDurationSeconds
+            totalDurationSeconds = totalDurationSeconds,
+            voiceChannelManager = voiceChannelManager
         )
     }
 
@@ -93,7 +102,6 @@ actual fun GameScreenContainer(
         )
     }
 
-    val myUserId = AppModule.tokenStorage.userId ?: ""
     val myNickname = AppModule.tokenStorage.currentUser.value?.nickname ?: "Player"
 
     // Render the actual game screen
@@ -109,6 +117,8 @@ actual fun GameScreenContainer(
         uiState = uiState,
         myUserId = myUserId,
         myNickname = myNickname,
+        voiceChannelManager = voiceChannelManager,
+        teammates = room?.participants?.filter { it.role == myRole } ?: emptyList(),
         onRequestCatch = { thiefUserId, policeUserId, policeNickname ->
             viewModel.requestCatch(
                 thiefUserId = thiefUserId,

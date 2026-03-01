@@ -206,6 +206,51 @@ class GameWebSocketClient(
         }
     }
 
+    // WebRTC signaling send methods
+    suspend fun sendRTCOffer(fromUserId: String, toUserId: String, sdp: String) {
+        try {
+            val message = WebSocketMessage.RTCOffer(fromUserId, toUserId, sdp)
+            val json = Json.encodeToString<WebSocketMessage>(message)
+            session?.send(Frame.Text(json))
+            println("📡 [WS] Sent RTCOffer: $fromUserId → $toUserId")
+        } catch (e: Exception) {
+            println("❌ [WS] Error sending RTCOffer: ${e.message}")
+        }
+    }
+
+    suspend fun sendRTCAnswer(fromUserId: String, toUserId: String, sdp: String) {
+        try {
+            val message = WebSocketMessage.RTCAnswer(fromUserId, toUserId, sdp)
+            val json = Json.encodeToString<WebSocketMessage>(message)
+            session?.send(Frame.Text(json))
+            println("📡 [WS] Sent RTCAnswer: $fromUserId → $toUserId")
+        } catch (e: Exception) {
+            println("❌ [WS] Error sending RTCAnswer: ${e.message}")
+        }
+    }
+
+    suspend fun sendRTCIceCandidate(fromUserId: String, toUserId: String, sdp: String, sdpMLineIndex: Int, sdpMid: String?) {
+        try {
+            val message = WebSocketMessage.RTCIceCandidate(fromUserId, toUserId, sdp, sdpMLineIndex, sdpMid)
+            val json = Json.encodeToString<WebSocketMessage>(message)
+            session?.send(Frame.Text(json))
+            println("🧊 [WS] Sent RTCIceCandidate: $fromUserId → $toUserId")
+        } catch (e: Exception) {
+            println("❌ [WS] Error sending RTCIceCandidate: ${e.message}")
+        }
+    }
+
+    suspend fun sendRTCPeerLeft(userId: String) {
+        try {
+            val message = WebSocketMessage.RTCPeerLeft(userId)
+            val json = Json.encodeToString<WebSocketMessage>(message)
+            session?.send(Frame.Text(json))
+            println("🔌 [WS] Sent RTCPeerLeft: $userId")
+        } catch (e: Exception) {
+            println("❌ [WS] Error sending RTCPeerLeft: ${e.message}")
+        }
+    }
+
     enum class ConnectionState {
         DISCONNECTED,
         CONNECTING,

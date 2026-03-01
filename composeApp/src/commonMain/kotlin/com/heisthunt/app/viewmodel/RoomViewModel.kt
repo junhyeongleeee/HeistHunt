@@ -10,6 +10,8 @@ import com.heisthunt.shared.models.Participant
 import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.models.Room
 import com.heisthunt.shared.models.RoomSettings
+import com.heisthunt.shared.models.RoomStatus
+import kotlinx.datetime.Clock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,13 +85,35 @@ class RoomViewModel(
                 println("❌ [RoomViewModel] This will cause incorrect role display!")
             }
 
+            // Update participant roles in the room so catchableThieves is populated correctly
+            val currentRoom = _detailState.value.room
+            val roomWithRoles = if (currentRoom != null && event.roleAssignments.isNotEmpty()) {
+                val updatedParticipants = currentRoom.participants.map { participant ->
+                    val roleName = event.roleAssignments[participant.userId]
+                    if (roleName != null) {
+                        participant.copy(role = PlayerRole.valueOf(roleName))
+                    } else {
+                        participant
+                    }
+                }
+                println("🎭 [RoomViewModel] Updated participant roles:")
+                updatedParticipants.forEach { p ->
+                    println("  - ${p.nickname}: role=${p.role}")
+                }
+                currentRoom.copy(participants = updatedParticipants)
+            } else {
+                println("⚠️ [RoomViewModel] Could not update participant roles: room=${currentRoom != null}, roleAssignments=${event.roleAssignments.size}")
+                currentRoom
+            }
+
             _detailState.value = _detailState.value.copy(
                 shouldNavigateToGame = true,
                 gameId = event.gameId,
                 myRole = myRole,
                 gameStartTime = event.startTime,
                 escapeDurationSeconds = event.escapeDurationSeconds,
-                totalDurationSeconds = event.totalDurationSeconds
+                totalDurationSeconds = event.totalDurationSeconds,
+                room = roomWithRoles
             )
 
             println("🚀 [RoomViewModel] Navigation state set!")
@@ -309,15 +333,45 @@ class RoomViewModel(
         myRole: PlayerRole,
         gameStartTime: kotlinx.datetime.Instant,
         escapeDurationSeconds: Long,
-        totalDurationSeconds: Long
+        totalDurationSeconds: Long,
+        participants: List<Participant> = emptyList()
     ) {
+        println("🔄 [RoomViewModel] restoreGameState:")
+        println("  gameId: $gameId")
+        println("  myRole: $myRole")
+        println("  participants: ${participants.size}")
+        participants.forEach { p ->
+            println("  - ${p.nickname}: role=${p.role}, isCaught=${p.isCaught}")
+        }
+
+        // Create a synthetic room with participants so GameScreenContainer
+        // can populate catchableThieves correctly on game rejoin
+        val syntheticRoom = if (participants.isNotEmpty()) {
+            _detailState.value.room?.copy(participants = participants)
+                ?: Room(
+                    id = gameId,
+                    code = "",
+                    name = "",
+                    hostId = "",
+                    settings = RoomSettings(),
+                    status = RoomStatus.PLAYING,
+                    participants = participants,
+                    createdAt = gameStartTime,
+                    updatedAt = gameStartTime
+                )
+        } else {
+            println("⚠️ [RoomViewModel] No participants in restoreGameState - catchableThieves will be empty")
+            _detailState.value.room
+        }
+
         _detailState.value = _detailState.value.copy(
             gameId = gameId,
             myRole = myRole,
             gameStartTime = gameStartTime,
             escapeDurationSeconds = escapeDurationSeconds,
             totalDurationSeconds = totalDurationSeconds,
-            shouldNavigateToGame = true
+            shouldNavigateToGame = true,
+            room = syntheticRoom
         )
     }
 

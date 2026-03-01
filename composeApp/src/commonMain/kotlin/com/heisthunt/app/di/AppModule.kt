@@ -10,9 +10,12 @@ import com.heisthunt.app.repository.RoomRepository
 import com.heisthunt.app.storage.SecureStorage
 import com.heisthunt.app.utils.HapticFeedback
 import com.heisthunt.app.viewmodel.AuthViewModel
+import com.heisthunt.app.voice.VoiceChannelManager
 import com.heisthunt.app.viewmodel.GameViewModel
 import com.heisthunt.app.viewmodel.RoomViewModel
+import com.heisthunt.shared.models.Participant
 import com.heisthunt.shared.models.PlayerRole
+import kotlinx.coroutines.flow.MutableSharedFlow
 
 object AppModule {
     lateinit var secureStorage: SecureStorage
@@ -25,12 +28,20 @@ object AppModule {
         this.tokenStorage.loadUser()
     }
 
+    /** Emits Unit when the API client forces a logout due to unrecoverable 401 */
+    val forceLogoutFlow = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
     // API Client - 싱글톤
     private val apiClient: ApiClient by lazy {
         ApiClient(
             baseUrl = getBaseUrl(),
             tokenStorage = tokenStorage
-        )
+        ).also { client ->
+            client.onForceLogout = {
+                println("🔒 [AppModule] Force logout triggered by token refresh failure")
+                forceLogoutFlow.tryEmit(Unit)
+            }
+        }
     }
 
     // Repositories
@@ -61,11 +72,14 @@ object AppModule {
     fun provideGameViewModel(
         gameId: String,
         myRole: PlayerRole,
+        participants: List<Participant>,
+        myUserId: String,
         locationService: LocationService,
         hapticFeedback: HapticFeedback,
         startTime: kotlinx.datetime.Instant?,
         escapeDurationSeconds: Long,
-        totalDurationSeconds: Long
+        totalDurationSeconds: Long,
+        voiceChannelManager: VoiceChannelManager? = null
     ): GameViewModel {
         val wsClient = GameWebSocketClient(
             baseUrl = getWebSocketBaseUrl(),
@@ -76,12 +90,15 @@ object AppModule {
             gameRepository = gameRepository,
             gameId = gameId,
             myRole = myRole,
+            participants = participants,
+            myUserId = myUserId,
             locationService = locationService,
             wsClient = wsClient,
             hapticFeedback = hapticFeedback,
             startTime = startTime,
             escapeDurationSeconds = escapeDurationSeconds,
-            totalDurationSeconds = totalDurationSeconds
+            totalDurationSeconds = totalDurationSeconds,
+            voiceChannelManager = voiceChannelManager
         )
     }
 

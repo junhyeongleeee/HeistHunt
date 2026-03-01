@@ -31,20 +31,57 @@ class AuthViewModel(
 
     private fun checkAutoLogin() {
         viewModelScope.launch {
+            println("🔐 [AuthViewModel] Checking auto-login, isLoggedIn=${tokenStorage.isLoggedIn}")
             if (tokenStorage.isLoggedIn) {
-                // Try to validate token
                 val result = authRepository.validateToken()
                 if (result.isSuccess) {
+                    println("✅ [AuthViewModel] Token valid, auto-login success")
                     _uiState.value = AuthUiState(
                         isLoggedIn = true,
                         user = authRepository.getCurrentUser()
                     )
                 } else {
-                    // Token expired, logout
-                    logout()
+                    println("⚠️ [AuthViewModel] Token invalid, attempting refresh before logout")
+                    val refreshResult = authRepository.refreshTokens()
+                    if (refreshResult.isSuccess) {
+                        println("✅ [AuthViewModel] Token refreshed successfully, auto-login")
+                        _uiState.value = AuthUiState(
+                            isLoggedIn = true,
+                            user = authRepository.getCurrentUser()
+                        )
+                    } else {
+                        println("❌ [AuthViewModel] Token refresh failed, logging out")
+                        logout()
+                    }
                 }
+            } else {
+                println("ℹ️ [AuthViewModel] No stored tokens, waiting for login")
             }
         }
+    }
+
+    fun googleLogin(idToken: String) {
+        viewModelScope.launch {
+            println("🔵 [AuthViewModel] Google login started")
+            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            authRepository.googleLogin(idToken)
+                .onSuccess { user ->
+                    println("✅ [AuthViewModel] Google login success: ${user.nickname}")
+                    _uiState.value = AuthUiState(isLoading = false, user = user, isLoggedIn = true)
+                }
+                .onFailure { exception ->
+                    println("❌ [AuthViewModel] Google login failed: ${exception.message}")
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = exception.message ?: "Google login failed"
+                    )
+                }
+        }
+    }
+
+    fun forceLogout() {
+        println("🔒 [AuthViewModel] Force logout triggered by expired session")
+        logout()
     }
 
     fun login(email: String, password: String) {

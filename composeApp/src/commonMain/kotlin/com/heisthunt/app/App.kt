@@ -29,7 +29,7 @@ enum class Screen {
 
 @Composable
 fun App(
-    onGoogleLogin: (suspend () -> Boolean)? = null
+    onGoogleLogin: (suspend () -> String?)? = null
 ) {
     val authViewModel = remember { AppModule.provideAuthViewModel() }
     val roomViewModel = remember { AppModule.provideRoomViewModel() }
@@ -40,6 +40,14 @@ fun App(
 
     var currentScreen by remember { mutableStateOf(Screen.Login) }
     var gameResult by remember { mutableStateOf<com.heisthunt.shared.dto.GameResultResponse?>(null) }
+
+    // Force logout observer — triggered by ApiClient when token refresh fails
+    LaunchedEffect(Unit) {
+        AppModule.forceLogoutFlow.collect {
+            println("🔒 [App.kt] Force logout received, clearing auth state")
+            authViewModel.forceLogout()
+        }
+    }
 
     // Auto-login and game rejoin logic
     // IMPORTANT: This only runs once when user logs in, not on every auth state change
@@ -61,12 +69,14 @@ fun App(
                     println("   StartTime: ${activeGame.startTime}")
 
                     // Restore game state in RoomViewModel
+                    println("🔄 [App.kt] Restoring game state with ${activeGame.participants.size} participants")
                     roomViewModel.restoreGameState(
                         gameId = activeGame.gameId,
                         myRole = activeGame.myRole,
                         gameStartTime = activeGame.startTime,
                         escapeDurationSeconds = activeGame.escapeDurationSeconds,
-                        totalDurationSeconds = activeGame.totalDurationSeconds
+                        totalDurationSeconds = activeGame.totalDurationSeconds,
+                        participants = activeGame.participants
                     )
 
                     // Navigate to game screen
@@ -100,22 +110,20 @@ fun App(
                         },
                         onGoogleLogin = {
                             println("🔵 [App.kt] Google Login button clicked")
-                            onGoogleLogin?.let {
-                                println("🔵 [App.kt] Launching coroutine for Google login")
+                            onGoogleLogin?.let { getIdToken ->
                                 scope.launch {
-                                    println("🔵 [App.kt] Calling onGoogleLogin suspend function")
-                                    val success = it()
-                                    println("🔵 [App.kt] onGoogleLogin returned: $success")
-                                    if (success) {
-                                        println("✅ [App.kt] Navigating to Operation screen")
-                                        currentScreen = Screen.Operation
+                                    println("🔵 [App.kt] Calling getIdToken()")
+                                    val idToken = getIdToken()
+                                    println("🔵 [App.kt] getIdToken returned: ${idToken?.take(20)}...")
+                                    if (idToken != null) {
+                                        println("✅ [App.kt] Got idToken, calling authViewModel.googleLogin()")
+                                        authViewModel.googleLogin(idToken)
+                                        // Navigation handled by LaunchedEffect(authState.isLoggedIn)
                                     } else {
-                                        println("❌ [App.kt] Login failed, staying on Login screen")
+                                        println("❌ [App.kt] No idToken received (sign-in cancelled or failed)")
                                     }
                                 }
-                            } ?: run {
-                                println("❌ [App.kt] onGoogleLogin callback is null!")
-                            }
+                            } ?: println("❌ [App.kt] onGoogleLogin callback is null!")
                         },
                         onNavigateToRegister = {
                             authViewModel.clearError()

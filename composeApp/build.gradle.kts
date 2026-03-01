@@ -91,6 +91,9 @@ kotlin {
             // Google Maps
             implementation("com.google.android.gms:play-services-maps:18.2.0")
             implementation("com.google.maps.android:maps-compose:4.3.3")
+
+            // WebRTC
+            implementation("io.getstream:stream-webrtc-android:1.0.3")
         }
         commonMain.dependencies {
             implementation(compose.runtime)

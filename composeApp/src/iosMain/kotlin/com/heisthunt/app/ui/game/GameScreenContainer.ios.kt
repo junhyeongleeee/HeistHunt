@@ -8,6 +8,7 @@ import com.heisthunt.app.di.AppModule
 import com.heisthunt.app.location.LocationService
 import com.heisthunt.app.utils.HapticFeedback
 import com.heisthunt.app.viewmodel.GameViewModel
+import com.heisthunt.app.voice.VoiceChannelManager
 import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.models.Room
 import kotlinx.datetime.Clock
@@ -25,12 +26,15 @@ actual fun GameScreenContainer(
 ) {
     val locationService = remember { LocationService() }
     val hapticFeedback = remember { HapticFeedback() }
+    val voiceChannelManager = remember { VoiceChannelManager() }
 
     // Create unique key to force new ViewModel creation for each game
     // IMPORTANT: Don't cache ViewModel - create new one for each game
     val viewModelKey = remember(gameId, myRole, startTime) {
         "$gameId-$myRole-${startTime?.toEpochMilliseconds() ?: Clock.System.now().toEpochMilliseconds()}"
     }
+
+    val myUserId = remember { AppModule.tokenStorage.userId ?: "" }
 
     val viewModel = remember(viewModelKey) {
         println("═══════════════════════════════════════════")
@@ -43,16 +47,21 @@ actual fun GameScreenContainer(
         println("  startTime is null: ${startTime == null}")
         println("  escapeDurationSeconds: $escapeDurationSeconds")
         println("  totalDurationSeconds: $totalDurationSeconds")
+        println("  participants: ${room?.participants?.size ?: 0}")
+        println("  myUserId: $myUserId")
         println("═══════════════════════════════════════════")
 
         AppModule.provideGameViewModel(
             gameId = gameId,
             myRole = myRole,
+            participants = room?.participants ?: emptyList(),
+            myUserId = myUserId,
             locationService = locationService,
             hapticFeedback = hapticFeedback,
             startTime = startTime,
             escapeDurationSeconds = escapeDurationSeconds,
-            totalDurationSeconds = totalDurationSeconds
+            totalDurationSeconds = totalDurationSeconds,
+            voiceChannelManager = voiceChannelManager
         )
     }
 
@@ -109,7 +118,6 @@ actual fun GameScreenContainer(
         )
     }
 
-    val myUserId = AppModule.tokenStorage.userId ?: ""
     val myNickname = AppModule.tokenStorage.currentUser.value?.nickname ?: "Player"
 
     // Render the actual game screen
@@ -133,6 +141,8 @@ actual fun GameScreenContainer(
         uiState = uiState,
         myUserId = myUserId,
         myNickname = myNickname,
+        voiceChannelManager = voiceChannelManager,
+        teammates = room?.participants?.filter { it.role == myRole } ?: emptyList(),
         onRequestCatch = { thiefUserId, policeUserId, policeNickname ->
             viewModel.requestCatch(
                 thiefUserId = thiefUserId,

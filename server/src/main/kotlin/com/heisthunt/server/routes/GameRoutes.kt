@@ -42,8 +42,7 @@ fun Route.gameRoutes(jwtConfig: JwtConfig) {
                 val userId = principal?.payload?.getClaim("userId")?.asString()
                     ?: return@get call.respond(HttpStatusCode.Unauthorized)
 
-                val activeGame = transaction {
-                    // Find active game for this user
+                val result = transaction {
                     val game = (Games innerJoin GamePlayers innerJoin Rooms)
                         .selectAll()
                         .where {
@@ -52,11 +51,7 @@ fun Route.gameRoutes(jwtConfig: JwtConfig) {
                         }
                         .orderBy(Games.startedAt, SortOrder.DESC)
                         .limit(1)
-                        .singleOrNull()
-
-                    if (game == null) {
-                        return@transaction null
-                    }
+                        .singleOrNull() ?: return@transaction ActiveGameResult.NotFound
 
                     val gameId = game[Games.id]
                     val roomId = game[Games.roomId]
@@ -64,36 +59,90 @@ fun Route.gameRoutes(jwtConfig: JwtConfig) {
                     val startTime = game[Games.startedAt]
                     val phase = game[Games.phase]
 
-                    // Get room settings
                     val room = Rooms.selectAll().where { Rooms.id eq roomId }.singleOrNull()
                     val gameDurationMinutes = room?.get(Rooms.gameDurationMinutes) ?: 30
                     val escapeDurationMinutes = room?.get(Rooms.escapeDurationMinutes) ?: 5
+                    val totalDurationSeconds = gameDurationMinutes * 60L
+                    val elapsedSeconds = (Clock.System.now() - startTime).inWholeSeconds
 
-                    com.heisthunt.shared.dto.ActiveGameResponse(
-                        gameId = gameId,
-                        roomId = roomId,
-                        roomName = room?.get(Rooms.name) ?: "",
-                        myRole = playerRole,
-                        startTime = startTime,
-                        escapeDurationSeconds = escapeDurationMinutes * 60L,
-                        totalDurationSeconds = gameDurationMinutes * 60L,
-                        phase = phase
+                    // Time expired: update DB inside transaction, handle side-effects outside
+                    if (elapsedSeconds >= totalDurationSeconds) {
+                        println("⏰ [ActiveGame] Game $gameId time expired (elapsed=${elapsedSeconds}s >= total=${totalDurationSeconds}s), auto-ending")
+                        Games.update({ Games.id eq gameId }) {
+                            it[status] = "FINISHED"
+                            it[winner] = "THIEF"
+                            it[endedAt] = Clock.System.now()
+                        }
+                        LocationUpdates.deleteWhere { LocationUpdates.gameId eq gameId }
+                        return@transaction ActiveGameResult.Expired(gameId)
+                    }
+
+                    val gamePlayers = (GamePlayers innerJoin Users)
+                        .selectAll()
+                        .where { GamePlayers.gameId eq gameId }
+                        .map { row ->
+                            com.heisthunt.shared.models.Participant(
+                                userId = row[GamePlayers.userId],
+                                nickname = row[Users.nickname],
+                                role = PlayerRole.valueOf(row[GamePlayers.role]),
+                                isCaught = row[GamePlayers.isCaught],
+                                joinedAt = startTime
+                            )
+                        }
+
+                    println("🔄 [ActiveGame] gameId=$gameId, phase=$phase, elapsed=${elapsedSeconds}s/${totalDurationSeconds}s, participants=${gamePlayers.size}")
+                    gamePlayers.forEach { p -> println("  - ${p.nickname}: role=${p.role}, isCaught=${p.isCaught}") }
+
+                    ActiveGameResult.Found(
+                        com.heisthunt.shared.dto.ActiveGameResponse(
+                            gameId = gameId,
+                            roomId = roomId,
+                            roomName = room?.get(Rooms.name) ?: "",
+                            myRole = playerRole,
+                            startTime = startTime,
+                            escapeDurationSeconds = escapeDurationMinutes * 60L,
+                            totalDurationSeconds = gameDurationMinutes * 60L,
+                            phase = phase,
+                            participants = gamePlayers
+                        )
                     )
                 }
 
-                if (activeGame != null) {
-                    call.respond(HttpStatusCode.OK, com.heisthunt.shared.dto.ApiResponse(success = true, data = activeGame))
-                } else {
-                    call.respond(
-                        HttpStatusCode.NotFound,
-                        com.heisthunt.shared.dto.ApiResponse<Unit>(
-                            success = false,
-                            error = com.heisthunt.shared.dto.ErrorResponse(
-                                com.heisthunt.shared.dto.ErrorCodes.GAME_NOT_FOUND,
-                                "No active game"
+                when (result) {
+                    is ActiveGameResult.Found -> {
+                        call.respond(HttpStatusCode.OK, com.heisthunt.shared.dto.ApiResponse(success = true, data = result.response))
+                    }
+                    is ActiveGameResult.Expired -> {
+                        // Broadcast game ended to any still-connected clients, then cleanup
+                        println("🏁 [ActiveGame] Game ${result.gameId} auto-ended, broadcasting GameEnded")
+                        GameConnectionManager.broadcastMessage(
+                            result.gameId,
+                            WebSocketMessage.GameEnded(com.heisthunt.shared.models.GameWinner.THIEF)
+                        )
+                        GameConnectionManager.cancelGameTimer(result.gameId)
+                        call.respond(
+                            HttpStatusCode.NotFound,
+                            com.heisthunt.shared.dto.ApiResponse<Unit>(
+                                success = false,
+                                error = com.heisthunt.shared.dto.ErrorResponse(
+                                    com.heisthunt.shared.dto.ErrorCodes.GAME_NOT_FOUND,
+                                    "Game time expired"
+                                )
                             )
                         )
-                    )
+                    }
+                    ActiveGameResult.NotFound -> {
+                        call.respond(
+                            HttpStatusCode.NotFound,
+                            com.heisthunt.shared.dto.ApiResponse<Unit>(
+                                success = false,
+                                error = com.heisthunt.shared.dto.ErrorResponse(
+                                    com.heisthunt.shared.dto.ErrorCodes.GAME_NOT_FOUND,
+                                    "No active game"
+                                )
+                            )
+                        )
+                    }
                 }
             }
 
@@ -747,6 +796,42 @@ fun Route.gameRoutes(jwtConfig: JwtConfig) {
                                     GameConnectionManager.broadcastMessage(gameId, message)
                                 }
 
+                                is WebSocketMessage.RTCOffer -> {
+                                    // WebRTC offer relay: sender → target user
+                                    println("📡 [RTC] RTCOffer relay: ${message.fromUserId} → ${message.toUserId}")
+                                    GameConnectionManager.sendToUser(gameId, message.toUserId, message)
+                                }
+
+                                is WebSocketMessage.RTCAnswer -> {
+                                    // WebRTC answer relay: sender → target user
+                                    println("📡 [RTC] RTCAnswer relay: ${message.fromUserId} → ${message.toUserId}")
+                                    GameConnectionManager.sendToUser(gameId, message.toUserId, message)
+                                }
+
+                                is WebSocketMessage.RTCIceCandidate -> {
+                                    // WebRTC ICE candidate relay: sender → target user
+                                    println("🧊 [RTC] RTCIceCandidate relay: ${message.fromUserId} → ${message.toUserId}")
+                                    GameConnectionManager.sendToUser(gameId, message.toUserId, message)
+                                }
+
+                                is WebSocketMessage.RTCPeerLeft -> {
+                                    // WebRTC peer left: broadcast to same role teammates
+                                    println("🔌 [RTC] RTCPeerLeft: $userId left voice channel")
+                                    val senderRole = transaction {
+                                        GamePlayers.select {
+                                            (GamePlayers.gameId eq gameId) and
+                                            (GamePlayers.userId eq userId)
+                                        }.singleOrNull()?.let {
+                                            PlayerRole.valueOf(it[GamePlayers.role])
+                                        }
+                                    }
+                                    if (senderRole != null) {
+                                        GameConnectionManager.broadcastToRole(gameId, senderRole, message)
+                                    } else {
+                                        GameConnectionManager.broadcastMessage(gameId, message)
+                                    }
+                                }
+
                                 else -> {
                                     println("Unhandled message type: ${message::class.simpleName}")
                                 }
@@ -773,4 +858,10 @@ private sealed class StartGameResult {
     data object NotHost : StartGameResult()
     data object NotEnoughPlayers : StartGameResult()
     data object NotAllReady : StartGameResult()
+}
+
+private sealed class ActiveGameResult {
+    data class Found(val response: com.heisthunt.shared.dto.ActiveGameResponse) : ActiveGameResult()
+    data class Expired(val gameId: String) : ActiveGameResult()
+    data object NotFound : ActiveGameResult()
 }

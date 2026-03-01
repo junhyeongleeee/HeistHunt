@@ -112,6 +112,11 @@ fun ResultScreen(
         )
 
         // 게임 통계 카드
+        val caughtCount = result.players.count { it.role == PlayerRole.THIEF && it.isCaught }
+        val escapedCount = result.players.count { it.role == PlayerRole.THIEF && !it.isCaught }
+        val totalThieves = result.players.count { it.role == PlayerRole.THIEF }
+        val totalPolice = result.players.count { it.role == PlayerRole.POLICE }
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -131,16 +136,17 @@ fun ResultScreen(
                     color = Color(0xFF64748B)
                 )
                 HorizontalDivider(color = Color(0xFF1E293B))
-
-                val caughtCount = result.players.count { it.role == PlayerRole.THIEF && it.isCaught }
-                val totalThieves = result.players.count { it.role == PlayerRole.THIEF }
-
                 StatRow(label = "플레이 시간", value = formatDuration(result.duration))
-                StatRow(label = "체포된 도둑", value = "$caughtCount / $totalThieves")
+                StatRow(label = "경찰", value = "${totalPolice}명")
+                StatRow(label = "체포된 도둑", value = "${caughtCount}명 / ${totalThieves}명")
+                StatRow(label = "탈출한 도둑", value = "${escapedCount}명 / ${totalThieves}명")
             }
         }
 
-        // 플레이어 목록 카드
+        // 플레이어 목록 카드 - 팀별 섹션으로 구분
+        val policePlayers = result.players.filter { it.role == PlayerRole.POLICE }.sortedBy { it.nickname }
+        val thiefPlayers = result.players.filter { it.role == PlayerRole.THIEF }.sortedBy { it.nickname }
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -152,25 +158,63 @@ fun ResultScreen(
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "플레이어",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp,
-                    color = Color(0xFF64748B)
-                )
+                // 경찰팀 섹션
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "🚔 경찰팀",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp,
+                        color = if (isPoliceWin) Color(0xFF3B82F6) else Color(0xFF64748B)
+                    )
+                    Text(
+                        text = if (isPoliceWin) "승리 🏆" else "패배",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isPoliceWin) Color(0xFF3B82F6) else Color(0xFF64748B)
+                    )
+                }
                 HorizontalDivider(color = Color(0xFF1E293B))
-
-                // 경찰 먼저, 도둑 다음
-                val sorted = result.players.sortedWith(
-                    compareBy({ it.role != PlayerRole.POLICE }, { it.nickname })
-                )
-                sorted.forEach { player ->
+                policePlayers.forEach { player ->
                     PlayerRow(
                         player = player,
                         isMe = player.userId == myUserId,
-                        teamWon = (player.role == PlayerRole.POLICE && isPoliceWin)
-                               || (player.role == PlayerRole.THIEF && !isPoliceWin)
+                        teamWon = isPoliceWin
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // 도둑팀 섹션
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "💰 도둑팀",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp,
+                        color = if (!isPoliceWin) Color(0xFFEF4444) else Color(0xFF64748B)
+                    )
+                    Text(
+                        text = if (!isPoliceWin) "승리 🏆" else "패배",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (!isPoliceWin) Color(0xFFEF4444) else Color(0xFF64748B)
+                    )
+                }
+                HorizontalDivider(color = Color(0xFF1E293B))
+                thiefPlayers.forEach { player ->
+                    PlayerRow(
+                        player = player,
+                        isMe = player.userId == myUserId,
+                        teamWon = !isPoliceWin
                     )
                 }
             }
@@ -178,10 +222,10 @@ fun ResultScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // 로비로 버튼
+        // 게임 시작 전 화면으로 버튼
         Button(
             onClick = {
-                println("🔙 [ResultScreen] Back to lobby button clicked")
+                println("🔙 [ResultScreen] Back to pre-game screen button clicked")
                 onBackToLobby()
             },
             modifier = Modifier
@@ -193,7 +237,7 @@ fun ResultScreen(
             shape = RoundedCornerShape(12.dp)
         ) {
             Text(
-                text = "로비로 돌아가기",
+                text = "게임 시작 전 화면으로",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFFE2E8F0)

@@ -24,6 +24,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.heisthunt.app.viewmodel.GameUiState
+import com.heisthunt.app.voice.VoiceChannelManager
+import com.heisthunt.shared.models.Participant
 import com.heisthunt.shared.models.PlayerLocation
 import com.heisthunt.shared.models.PlayerRole
 import com.heisthunt.shared.models.Room
@@ -37,6 +39,8 @@ fun GameScreen(
     uiState: GameUiState?,
     myUserId: String = "",
     myNickname: String = "Player",
+    voiceChannelManager: VoiceChannelManager? = null,
+    teammates: List<Participant> = emptyList(),
     onRequestCatch: (thiefUserId: String, policeUserId: String, policeNickname: String) -> Unit,
     onConfirmCatch: (thiefUserId: String, thiefNickname: String) -> Unit,
     onRejectCatch: (thiefUserId: String) -> Unit,
@@ -65,6 +69,7 @@ fun GameScreen(
 
     // Leave game confirmation dialog state
     var showLeaveDialog by remember { mutableStateOf(false) }
+    var showTeamPanel by remember { mutableStateOf(false) }
 
     // BackHandler - show confirmation dialog instead of leaving directly
     PlatformBackHandler(onBack = { showLeaveDialog = true })
@@ -146,6 +151,24 @@ fun GameScreen(
                     )
                 }
                 */
+
+                // Team voice channel button (top-right)
+                if (voiceChannelManager != null) {
+                    FloatingActionButton(
+                        onClick = { showTeamPanel = !showTeamPanel },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 12.dp, end = 12.dp)
+                            .size(44.dp),
+                        containerColor = Color(0xFF0F172A).copy(alpha = 0.9f),
+                        elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                    ) {
+                        Text(
+                            text = if (myRole == PlayerRole.POLICE) "🚔" else "💰",
+                            fontSize = 18.sp
+                        )
+                    }
+                }
             }
 
             // Action Footer (하단)
@@ -154,7 +177,7 @@ fun GameScreen(
                 gamePhase = gamePhase,
                 remainingThieves = remainingThieves,
                 totalThieves = totalThieves,
-                nearbyThieves = uiState?.nearbyThieves ?: emptyList(),
+                nearbyThieves = uiState?.catchableThieves ?: emptyList(),
                 isCaught = uiState?.isCaught == true,
                 escapeDurationSeconds = uiState?.escapeDurationSeconds ?: 300L,
                 myPoliceId = myUserId,
@@ -182,6 +205,19 @@ fun GameScreen(
                     onBack()
                 },
                 onDismiss = { showLeaveDialog = false }
+            )
+        }
+
+        // Team voice panel (slides in from right)
+        if (voiceChannelManager != null) {
+            TeamVoicePanel(
+                visible = showTeamPanel,
+                voiceChannelManager = voiceChannelManager,
+                myUserId = myUserId,
+                teammates = teammates,
+                myRole = myRole,
+                onDismiss = { showTeamPanel = false },
+                modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
     }
@@ -658,7 +694,7 @@ private fun CatchRequestDialog(
 
 @Composable
 private fun CatchTargetDialog(
-    nearbyThieves: List<PlayerLocation>,
+    catchableThieves: List<Participant>,
     onSelectThief: (thiefUserId: String) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -693,7 +729,7 @@ private fun CatchTargetDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                nearbyThieves.forEach { thief ->
+                catchableThieves.forEach { thief ->
                     Button(
                         onClick = { onSelectThief(thief.userId) },
                         modifier = Modifier.fillMaxWidth(),
@@ -702,21 +738,11 @@ private fun CatchTargetDialog(
                         ),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.Start,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "도둑 ${thief.userId.take(8)}",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                            Text(
-                                text = "위치: ${thief.location.latitude.formatDecimal(6)}, ${thief.location.longitude.formatDecimal(6)}",
-                                fontSize = 10.sp,
-                                modifier = Modifier.alpha(0.7f)
-                            )
-                        }
+                        Text(
+                            text = thief.nickname,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
                     }
                 }
             }
@@ -893,7 +919,7 @@ private fun ActionFooter(
     gamePhase: String,
     remainingThieves: Int,
     totalThieves: Int,
-    nearbyThieves: List<PlayerLocation>,
+    nearbyThieves: List<Participant>,
     isCaught: Boolean,
     escapeDurationSeconds: Long,
     myPoliceId: String,
@@ -912,7 +938,7 @@ private fun ActionFooter(
         if (role == PlayerRole.POLICE) {
             // Police UI: Capture button
             val isEscapePhase = gamePhase == "ESCAPE"
-            val canCatch = nearbyThieves.isNotEmpty() && !isEscapePhase
+            val canCatch = !isEscapePhase && nearbyThieves.isNotEmpty()
 
             Button(
                 onClick = {
@@ -949,8 +975,8 @@ private fun ActionFooter(
                     Text(
                         text = when {
                             isEscapePhase -> "도둑이 도망치는 중..."
-                            nearbyThieves.isNotEmpty() -> "도둑 ${nearbyThieves.size}명 감지됨"
-                            else -> "5m 이내에 도둑이 없습니다"
+                            nearbyThieves.isNotEmpty() -> "체포 가능한 도둑 ${nearbyThieves.size}명"
+                            else -> "체포 가능한 도둑이 없습니다"
                         },
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -964,7 +990,7 @@ private fun ActionFooter(
             // Catch target selection dialog
             if (showCatchDialog) {
                 CatchTargetDialog(
-                    nearbyThieves = nearbyThieves,
+                    catchableThieves = nearbyThieves,
                     onSelectThief = { thiefUserId ->
                         onRequestCatch(thiefUserId, myPoliceId, myPoliceNickname)
                         showCatchDialog = false
