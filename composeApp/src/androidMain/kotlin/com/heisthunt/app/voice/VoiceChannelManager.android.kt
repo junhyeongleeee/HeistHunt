@@ -1,6 +1,12 @@
 package com.heisthunt.app.voice
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.webrtc.*
@@ -13,6 +19,9 @@ actual class VoiceChannelManager(private val context: Context) {
     private val peerConnections = mutableMapOf<String, PeerConnection>()
     private val iceCandidateQueues = mutableMapOf<String, MutableList<IceCandidate>>()
     private var myUserId: String = ""
+    private var scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var headsetReceiver: BroadcastReceiver? = null
 
     private val _connectionState = MutableStateFlow(VoiceConnectionState.IDLE)
     actual val connectionState: StateFlow<VoiceConnectionState> = _connectionState
@@ -22,6 +31,9 @@ actual class VoiceChannelManager(private val context: Context) {
 
     private val _isMuted = MutableStateFlow(false)
     actual val isMuted: StateFlow<Boolean> = _isMuted
+
+    private val _isSpeaking = MutableStateFlow(false)
+    actual val isSpeaking: StateFlow<Boolean> = _isSpeaking
 
     actual var onLocalIceCandidate: ((toUserId: String, sdp: String, sdpMLineIndex: Int, sdpMid: String?) -> Unit)? = null
 
@@ -41,13 +53,116 @@ actual class VoiceChannelManager(private val context: Context) {
         localAudioTrack = factory!!.createAudioTrack("LOCAL_AUDIO_TRACK", audioSource)
         localAudioTrack?.setEnabled(true)
 
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        updateAudioRouting()
+
+        // 이어폰 연결/해제 동적 감지
+        headsetReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                if (intent.action == Intent.ACTION_HEADSET_PLUG) updateAudioRouting()
+            }
+        }
+        @Suppress("UnspecifiedRegisterReceiverFlag")
+        context.registerReceiver(headsetReceiver, IntentFilter(Intent.ACTION_HEADSET_PLUG))
+
+        // 재연결 시 이전 scope 취소 후 새 scope 생성
+        if (!scope.isActive) {
+            scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        }
+
         _connectionState.value = VoiceConnectionState.CONNECTING
         println("✅ [VoiceChannelManager] Initialized successfully")
+        startAudioLevelMonitoring()
+    }
+
+    private var statsDebugLogged = false
+
+    private fun startAudioLevelMonitoring() {
+        scope.launch {
+            while (isActive) {
+                delay(200)
+                val connections = peerConnections.toMap()
+                if (connections.isEmpty()) continue
+
+                // 내 오디오 레벨: stream-webrtc-android 레거시 stats → "ssrc" + "audioInputLevel" (0-32768)
+                connections.values.firstOrNull()?.getStats { report ->
+                    if (!statsDebugLogged) {
+                        statsDebugLogged = true
+                        println("=== [VoiceChannelManager] ALL stat types ===")
+                        report.statsMap.values.forEach { s ->
+                            println("  type=${s.type}, ALL_keys=${s.members.keys}")
+                        }
+                    }
+                    report.statsMap.values.forEach { stats ->
+                        when (stats.type) {
+                            "transport" -> {
+                                val bytesSent = stats.members["bytesSent"]
+                                val bytesReceived = stats.members["bytesReceived"]
+                                val dtls = stats.members["dtlsState"]
+                                println("📊 [Stats] transport: dtls=$dtls sent=$bytesSent rcv=$bytesReceived")
+                            }
+                            "media-source" -> {
+                                val level = (stats.members["audioLevel"] as? Double) ?: 0.0
+                                _isSpeaking.value = level > 0.02
+                            }
+                            "outbound-rtp" -> {
+                                val audioLevel = stats.members["audioLevel"]
+                                    ?: stats.members["totalAudioEnergy"]
+                                if (audioLevel != null) {
+                                    val level = (audioLevel as? Number)?.toDouble() ?: 0.0
+                                    _isSpeaking.value = level > 0.02
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 상대방 오디오 레벨
+                connections.forEach { (peerId, pc) ->
+                    pc.getStats { report ->
+                        report.statsMap.values.forEach { stats ->
+                            when (stats.type) {
+                                "inbound-rtp" -> {
+                                    val audioLevel = stats.members["audioLevel"]
+                                        ?: stats.members["totalAudioEnergy"]
+                                    if (audioLevel != null) {
+                                        val level = (audioLevel as? Number)?.toDouble() ?: 0.0
+                                        val isTalking = level > 0.02
+                                        val current = _peerStates.value[peerId]
+                                        if (current != null && current.isSpeaking != isTalking) {
+                                            _peerStates.value = _peerStates.value.toMutableMap().also { map ->
+                                                map[peerId] = current.copy(isSpeaking = isTalking)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun buildPeerConnectionFor(peerId: String): PeerConnection? {
         val iceServers = listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
+            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer(),
+            // TURN relay servers (AP isolation / symmetric NAT 우회)
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
+            PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer(),
         )
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -238,8 +353,29 @@ actual class VoiceChannelManager(private val context: Context) {
         return newMuted
     }
 
+    private fun isHeadsetConnected(): Boolean {
+        val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        return devices.any {
+            it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+            it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        }
+    }
+
+    private fun updateAudioRouting() {
+        val headset = isHeadsetConnected()
+        audioManager.isSpeakerphoneOn = !headset
+        println("🔊 [VoiceChannelManager] Audio routing: ${if (headset) "HEADSET/BT" else "SPEAKER"}")
+    }
+
     actual fun dispose() {
         println("🔌 [VoiceChannelManager] Disposing all resources")
+        headsetReceiver?.let { context.unregisterReceiver(it) }
+        headsetReceiver = null
+        audioManager.isSpeakerphoneOn = false
+        audioManager.mode = AudioManager.MODE_NORMAL
+        scope.cancel()
         peerConnections.values.forEach { it.close() }
         peerConnections.clear()
         iceCandidateQueues.clear()
@@ -249,6 +385,7 @@ actual class VoiceChannelManager(private val context: Context) {
         factory = null
         _connectionState.value = VoiceConnectionState.IDLE
         _peerStates.value = emptyMap()
+        _isSpeaking.value = false
     }
 
     private fun updatePeerStatus(userId: String, status: PeerConnectionStatus) {

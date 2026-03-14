@@ -5,6 +5,7 @@ import com.heisthunt.server.routes.gameRoutes
 import com.heisthunt.server.routes.roomRoutes
 import com.heisthunt.server.routes.roomWebSocketRoutes
 import com.heisthunt.server.routes.userRoutes
+import com.heisthunt.server.routes.voiceTestRoutes
 import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -28,6 +29,7 @@ fun Application.configureRouting() {
             roomRoutes()
             roomWebSocketRoutes(jwtConfig)
             gameRoutes(jwtConfig)
+            voiceTestRoutes()
         }
     }
 }

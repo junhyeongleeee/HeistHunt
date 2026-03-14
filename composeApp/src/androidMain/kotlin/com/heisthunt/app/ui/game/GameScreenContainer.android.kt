@@ -1,10 +1,15 @@
 package com.heisthunt.app.ui.game
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.heisthunt.app.di.AppModule
 import com.heisthunt.app.location.LocationService
@@ -80,6 +85,24 @@ actual fun GameScreenContainer(
             permissionGranted = false
         }
     )
+
+    // Request microphone permission for voice channel
+    val micLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        println("🎤 [GameScreen] RECORD_AUDIO permission: ${if (granted) "GRANTED" else "DENIED"}")
+    }
+    LaunchedEffect(Unit) {
+        val micGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!micGranted) {
+            println("🎤 [GameScreen] Requesting RECORD_AUDIO permission...")
+            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            println("🎤 [GameScreen] RECORD_AUDIO permission already granted")
+        }
+    }
 
     // Cleanup on dispose
     DisposableEffect(Unit) {
