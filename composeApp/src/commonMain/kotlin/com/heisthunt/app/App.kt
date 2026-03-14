@@ -10,8 +10,10 @@ import kotlinx.coroutines.launch
 import com.heisthunt.app.di.AppModule
 import com.heisthunt.app.ui.auth.LoginScreen
 import com.heisthunt.app.ui.auth.RegisterScreen
+import com.heisthunt.app.ui.auth.SplashScreen
 import com.heisthunt.app.ui.debug.DebugSettingsScreen
 import com.heisthunt.app.ui.game.GameScreenContainer
+import com.heisthunt.app.ui.voicetest.VoiceTestScreenContainer
 import com.heisthunt.app.ui.game.OperationScreen
 import com.heisthunt.app.ui.game.ResultScreen
 import com.heisthunt.app.viewmodel.AuthViewModel
@@ -19,12 +21,14 @@ import com.heisthunt.app.viewmodel.RoomViewModel
 import kotlin.onSuccess
 
 enum class Screen {
+    Splash,
     Login,
     Register,
     Operation,
     Game,
     Result,
-    DebugSettings
+    DebugSettings,
+    VoiceTest
 }
 
 @Composable
@@ -38,7 +42,7 @@ fun App(
     val roomListState by roomViewModel.listState.collectAsState()
     val roomDetailState by roomViewModel.detailState.collectAsState()
 
-    var currentScreen by remember { mutableStateOf(Screen.Login) }
+    var currentScreen by remember { mutableStateOf(Screen.Splash) }
     var gameResult by remember { mutableStateOf<com.heisthunt.shared.dto.GameResultResponse?>(null) }
 
     // Force logout observer — triggered by ApiClient when token refresh fails
@@ -49,27 +53,24 @@ fun App(
         }
     }
 
-    // Auto-login and game rejoin logic
-    // IMPORTANT: This only runs once when user logs in, not on every auth state change
+    // Truveri 패턴: 자동로그인 체크 완료 후 목적지를 결정해두고, Splash 최소 시간 후 이동
     var hasCheckedActiveGame by remember { mutableStateOf(false) }
+    var splashTargetScreen by remember { mutableStateOf<Screen?>(null) }
 
-    LaunchedEffect(authState.isLoggedIn) {
+    LaunchedEffect(authState.isLoading, authState.isLoggedIn) {
+        if (authState.isLoading) return@LaunchedEffect // 아직 체크 중
+
         if (authState.isLoggedIn && !hasCheckedActiveGame) {
             hasCheckedActiveGame = true
-
             println("🔍 Checking for active game on login...")
-            // Check for active game
+
             val gameRepo = AppModule.gameRepository
             val result = gameRepo.getMyActiveGame()
+            var target = Screen.Operation
 
             result.onSuccess { activeGame ->
                 if (activeGame != null) {
                     println("✅ Active game found: ${activeGame.gameId}")
-                    println("   Role: ${activeGame.myRole}")
-                    println("   StartTime: ${activeGame.startTime}")
-
-                    // Restore game state in RoomViewModel
-                    println("🔄 [App.kt] Restoring game state with ${activeGame.participants.size} participants")
                     roomViewModel.restoreGameState(
                         gameId = activeGame.gameId,
                         myRole = activeGame.myRole,
@@ -78,20 +79,21 @@ fun App(
                         totalDurationSeconds = activeGame.totalDurationSeconds,
                         participants = activeGame.participants
                     )
-
-                    // Navigate to game screen
-                    currentScreen = Screen.Game
+                    target = Screen.Game
                 } else {
                     println("ℹ️ No active game, going to Operation")
-                    currentScreen = Screen.Operation
                 }
             }.onFailure { error ->
                 println("❌ Failed to check active game: ${error.message}")
-                currentScreen = Screen.Operation
             }
+
+            if (currentScreen == Screen.Splash) splashTargetScreen = target
+            else currentScreen = target
+
         } else if (!authState.isLoggedIn) {
             hasCheckedActiveGame = false
-            currentScreen = Screen.Login
+            if (currentScreen == Screen.Splash) splashTargetScreen = Screen.Login
+            else currentScreen = Screen.Login
         }
     }
 
@@ -101,6 +103,11 @@ fun App(
             color = MaterialTheme.colorScheme.background
         ) {
             when (currentScreen) {
+                Screen.Splash -> SplashScreen(
+                    isAuthReady = splashTargetScreen != null,
+                    onNavigate = { currentScreen = splashTargetScreen ?: Screen.Login }
+                )
+
                 Screen.Login -> {
                     val scope = rememberCoroutineScope()
                     LoginScreen(
@@ -225,7 +232,16 @@ fun App(
                     DebugSettingsScreen(
                         onBack = {
                             currentScreen = Screen.Operation
+                        },
+                        onVoiceTest = {
+                            currentScreen = Screen.VoiceTest
                         }
+                    )
+                }
+
+                Screen.VoiceTest -> {
+                    VoiceTestScreenContainer(
+                        onBack = { currentScreen = Screen.DebugSettings }
                     )
                 }
             }

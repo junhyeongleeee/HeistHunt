@@ -22,7 +22,7 @@ class AuthViewModel(
     private val tokenStorage: TokenStorage
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(AuthUiState())
+    private val _uiState = MutableStateFlow(AuthUiState(isLoading = true))
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
     init {
@@ -31,12 +31,14 @@ class AuthViewModel(
 
     private fun checkAutoLogin() {
         viewModelScope.launch {
+            _uiState.value = AuthUiState(isLoading = true)
             println("🔐 [AuthViewModel] Checking auto-login, isLoggedIn=${tokenStorage.isLoggedIn}")
             if (tokenStorage.isLoggedIn) {
                 val result = authRepository.validateToken()
                 if (result.isSuccess) {
                     println("✅ [AuthViewModel] Token valid, auto-login success")
                     _uiState.value = AuthUiState(
+                        isLoading = false,
                         isLoggedIn = true,
                         user = authRepository.getCurrentUser()
                     )
@@ -46,6 +48,7 @@ class AuthViewModel(
                     if (refreshResult.isSuccess) {
                         println("✅ [AuthViewModel] Token refreshed successfully, auto-login")
                         _uiState.value = AuthUiState(
+                            isLoading = false,
                             isLoggedIn = true,
                             user = authRepository.getCurrentUser()
                         )
@@ -55,7 +58,8 @@ class AuthViewModel(
                     }
                 }
             } else {
-                println("ℹ️ [AuthViewModel] No stored tokens, waiting for login")
+                println("ℹ️ [AuthViewModel] No stored tokens, showing login")
+                _uiState.value = AuthUiState(isLoading = false)
             }
         }
     }
