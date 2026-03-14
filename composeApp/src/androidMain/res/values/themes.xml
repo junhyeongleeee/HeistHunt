@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.HeistHunt" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- 앱 콘텐츠 로드 전 시스템이 보여주는 배경색 (#020617 - SplashScreen과 동일) -->
+        <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:windowIsTranslucent">false</item>
+    </style>
+</resources>

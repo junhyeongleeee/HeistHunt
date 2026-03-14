@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ SplashScreen API: 시스템 스플래시 배경을 앱 배경색과 동일하게 설정 -->
+    <style name="Theme.HeistHunt" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@color/splash_background</item>
+    </style>
+</resources>

@@ -49,6 +49,31 @@
 
 ### 2. 테스트 및 배포
 
+#### ⚠️ 필수: 개발 완료 후 항상 Firebase App Distribution 배포
+
+**모든 기능 개발/버그 수정 완료 후 반드시 자동 배포 실행:**
+
+```bash
+# Android 배포 (기본)
+cd /Users/junhyeong/AndroidStudioProjects/HeistHunt
+bash scripts/deploy.sh android "작업 내용 요약"
+
+# iOS도 준비된 경우
+bash scripts/deploy.sh both "작업 내용 요약"
+```
+
+**배포 스크립트가 자동으로 처리하는 것:**
+1. 현재 IP로 서버 URL 업데이트
+2. APK/IPA 빌드
+3. Firebase App Distribution 업로드
+4. loveany3131@gmail.com 으로 배포 알림 발송
+
+> Firebase App IDs:
+> - Android: `1:121910262869:android:de0ccb8b9c967bf31368dc`
+> - iOS: `1:121910262869:ios:8767d0265b3fb4951368dc` (Team ID 설정 후 활성화)
+
+---
+
 #### 자동화된 테스트 프로세스
 개발 완료 후 **테스트 에이전트를 통해 자동화**:
 1. 개발 완료 즉시 E2E 테스트 에이전트 실행 (백그라운드)

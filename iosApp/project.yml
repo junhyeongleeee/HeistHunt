@@ -17,6 +17,7 @@ targets:
         type: group
     resources:
       - path: iosApp/GoogleService-Info.plist
+      - path: iosApp/Assets.xcassets
     settings:
       base:
         INFOPLIST_FILE: iosApp/Info.plist
