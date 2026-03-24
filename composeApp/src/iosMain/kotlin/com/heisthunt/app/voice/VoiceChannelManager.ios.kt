@@ -16,6 +16,9 @@ actual class VoiceChannelManager {
     private val _isMuted = MutableStateFlow(false)
     actual val isMuted: StateFlow<Boolean> = _isMuted
 
+    private val _isSpeaking = MutableStateFlow(false)
+    actual val isSpeaking: StateFlow<Boolean> = _isSpeaking
+
     actual var onLocalIceCandidate: ((toUserId: String, sdp: String, sdpMLineIndex: Int, sdpMid: String?) -> Unit)? = null
 
     private var myUserId: String = ""

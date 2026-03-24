@@ -691,6 +691,15 @@ fun Route.gameRoutes(jwtConfig: JwtConfig) {
                                         Pair(phase, player)
                                     }
 
+                                    // 경찰 감옥 위치를 게임 중심점으로 캐시
+                                    if (playerData != null && playerData[GamePlayers.role] == "POLICE") {
+                                        val jailLat = playerData[GamePlayers.jailLatitude]
+                                        val jailLon = playerData[GamePlayers.jailLongitude]
+                                        if (jailLat != null && jailLon != null) {
+                                            GameConnectionManager.updateGameCenter(gameId, jailLat, jailLon)
+                                        }
+                                    }
+
                                     // ESCAPE 페이즈에서 경찰 이동 제한 확인
                                     if (playerData != null && playerData[GamePlayers.role] == "POLICE" && currentPhase == "ESCAPE") {
                                         val jailLat = playerData[GamePlayers.jailLatitude]
@@ -717,6 +726,68 @@ fun Route.gameRoutes(jwtConfig: JwtConfig) {
                                                         distanceFromJail = distance
                                                     )
                                                 )
+                                            }
+                                        }
+                                    }
+
+                                    // 도둑 게임 반경 이탈 감지 (모든 페이즈)
+                                    if (playerData != null && playerData[GamePlayers.role] == "THIEF" &&
+                                        !playerData[GamePlayers.isCaught]) {
+                                        val gameCenter = GameConnectionManager.getGameCenter(gameId)
+                                        if (gameCenter != null) {
+                                            val distance = GeoUtils.calculateDistance(
+                                                gameCenter.first, gameCenter.second,
+                                                message.location.latitude, message.location.longitude
+                                            )
+                                            val isOutside = distance > 500.0
+                                            val result = GameConnectionManager.checkThiefBoundary(gameId, userId, isOutside)
+                                            if (result != null) {
+                                                val (warningCount, isSentToJail) = result
+                                                val thiefNickname = transaction {
+                                                    (GamePlayers innerJoin Users)
+                                                        .selectAll()
+                                                        .where { (GamePlayers.gameId eq gameId) and (GamePlayers.userId eq userId) }
+                                                        .singleOrNull()?.get(Users.nickname) ?: userId
+                                                }
+                                                val violationMsg = WebSocketMessage.ThiefBoundaryViolation(
+                                                    thiefUserId = userId,
+                                                    thiefNickname = thiefNickname,
+                                                    warningCount = warningCount,
+                                                    isSentToJail = isSentToJail
+                                                )
+                                                println("⚠️ [Boundary] Thief $userId ($thiefNickname) ${distance}m from center, warning=$warningCount, jail=$isSentToJail")
+                                                GameConnectionManager.broadcastToRole(gameId, PlayerRole.POLICE, violationMsg)
+                                                GameConnectionManager.sendToUser(gameId, userId, violationMsg)
+
+                                                if (isSentToJail) {
+                                                    transaction {
+                                                        GamePlayers.update({
+                                                            (GamePlayers.gameId eq gameId) and (GamePlayers.userId eq userId)
+                                                        }) { it[isCaught] = true }
+                                                    }
+                                                    GameConnectionManager.markPlayerCaught(gameId, userId)
+                                                    GameConnectionManager.broadcastMessage(gameId, WebSocketMessage.PlayerCaught(userId, thiefNickname))
+                                                    val uncaughtThieves = transaction {
+                                                        GamePlayers.selectAll().where {
+                                                            (GamePlayers.gameId eq gameId) and
+                                                            (GamePlayers.role eq "THIEF") and
+                                                            (GamePlayers.isCaught eq false)
+                                                        }.count()
+                                                    }
+                                                    if (uncaughtThieves == 0L) {
+                                                        transaction {
+                                                            Games.update({ Games.id eq gameId }) {
+                                                                it[status] = "FINISHED"
+                                                                it[winner] = "POLICE"
+                                                                it[endedAt] = Clock.System.now()
+                                                            }
+                                                        }
+                                                        GameConnectionManager.broadcastMessage(gameId, WebSocketMessage.GameEnded(com.heisthunt.shared.models.GameWinner.POLICE))
+                                                        transaction { LocationUpdates.deleteWhere { LocationUpdates.gameId eq gameId } }
+                                                        GameConnectionManager.cancelGameTimer(gameId)
+                                                        println("🏁 All thieves caught (boundary) - POLICE wins (game $gameId)")
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -818,7 +889,7 @@ fun Route.gameRoutes(jwtConfig: JwtConfig) {
                                     // WebRTC peer left: broadcast to same role teammates
                                     println("🔌 [RTC] RTCPeerLeft: $userId left voice channel")
                                     val senderRole = transaction {
-                                        GamePlayers.select {
+                                        GamePlayers.selectAll().where {
                                             (GamePlayers.gameId eq gameId) and
                                             (GamePlayers.userId eq userId)
                                         }.singleOrNull()?.let {

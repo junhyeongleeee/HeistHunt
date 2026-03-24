@@ -9,13 +9,15 @@ data class PeerAudioState(
     val userId: String,
     val nickname: String,
     val isRemoteMuted: Boolean = false,
-    val connectionStatus: PeerConnectionStatus = PeerConnectionStatus.DISCONNECTED
+    val connectionStatus: PeerConnectionStatus = PeerConnectionStatus.DISCONNECTED,
+    val isSpeaking: Boolean = false
 )
 
 expect class VoiceChannelManager {
     val connectionState: StateFlow<VoiceConnectionState>
     val peerStates: StateFlow<Map<String, PeerAudioState>>
     val isMuted: StateFlow<Boolean>
+    val isSpeaking: StateFlow<Boolean>
     var onLocalIceCandidate: ((toUserId: String, sdp: String, sdpMLineIndex: Int, sdpMid: String?) -> Unit)?
 
     fun initialize(myUserId: String)

@@ -37,6 +37,13 @@ object GameConnectionManager {
     // gameId -> current phase (cached to avoid DB queries per broadcast)
     private val gamePhases = ConcurrentHashMap<String, String>()
 
+    // Thief boundary violation tracking: gameId -> userId -> (warningCount, lastWarningTimeMs)
+    private data class ViolationState(val warningCount: Int, val lastWarningTime: Long)
+    private val thiefViolations = ConcurrentHashMap<String, ConcurrentHashMap<String, ViolationState>>()
+
+    // gameId -> (lat, lon) game center (jail/spawn point)
+    private val gameCenterLocations = ConcurrentHashMap<String, Pair<Double, Double>>()
+
     fun addConnection(gameId: String, userId: String, session: WebSocketServerSession, role: PlayerRole) {
         connections.getOrPut(gameId) { ConcurrentHashMap() }[userId] = session
         playerRoles.getOrPut(gameId) { ConcurrentHashMap() }[userId] = role
@@ -49,6 +56,8 @@ object GameConnectionManager {
         playerRoles[gameId]?.remove(userId)
         println("Game connection removed: gameId=$gameId, userId=$userId")
 
+        thiefViolations[gameId]?.remove(userId)
+
         // Clean up empty game sessions
         if (connections[gameId]?.isEmpty() == true) {
             connections.remove(gameId)
@@ -56,8 +65,34 @@ object GameConnectionManager {
             playerRoles.remove(gameId)
             caughtPlayers.remove(gameId)
             gamePhases.remove(gameId)
+            thiefViolations.remove(gameId)
+            gameCenterLocations.remove(gameId)
             cancelGameTimer(gameId)
         }
+    }
+
+    fun updateGameCenter(gameId: String, lat: Double, lon: Double) {
+        gameCenterLocations[gameId] = Pair(lat, lon)
+    }
+
+    fun getGameCenter(gameId: String): Pair<Double, Double>? = gameCenterLocations[gameId]
+
+    // Returns (warningCount, isSentToJail) if a new warning should be issued, null if no action needed
+    fun checkThiefBoundary(gameId: String, userId: String, isOutside: Boolean): Pair<Int, Boolean>? {
+        if (!isOutside) {
+            thiefViolations[gameId]?.remove(userId)
+            return null
+        }
+        val violations = thiefViolations.getOrPut(gameId) { ConcurrentHashMap() }
+        val now = System.currentTimeMillis()
+        val current = violations[userId]
+        val shouldWarn = current == null || (now - current.lastWarningTime) >= 10_000L
+        if (!shouldWarn) return null
+        val newCount = (current?.warningCount ?: 0) + 1
+        violations[userId] = ViolationState(newCount, now)
+        val isSentToJail = newCount >= 3
+        println("⚠️ [Boundary] Thief $userId warning $newCount/3, isSentToJail=$isSentToJail")
+        return Pair(newCount, isSentToJail)
     }
 
     fun registerGameTimer(gameId: String, job: Job) {

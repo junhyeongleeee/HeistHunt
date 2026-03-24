@@ -194,63 +194,79 @@ private fun MainActionScreen(
             }
         )
     }
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .navigationBarsPadding()
-            .padding(32.dp),
-        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Header
-        Column(
-            modifier = Modifier.padding(top = 32.dp)
+        // Debug 버튼 — 우측 상단 작은 아이콘
+        TextButton(
+            onClick = onNavigateToDebug,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 8.dp, end = 8.dp)
         ) {
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "HUNT",
-                    fontSize = 36.sp,
-                    fontWeight = FontWeight.Black,
-                    fontStyle = FontStyle.Italic,
-                    letterSpacing = (-1).sp,
-                    color = Color(0xFF3B82F6) // blue-500
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "OR",
-                    fontSize = 36.sp,
-                    fontWeight = FontWeight.Black,
-                    fontStyle = FontStyle.Italic,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "HEIST",
-                    fontSize = 36.sp,
-                    fontWeight = FontWeight.Black,
-                    fontStyle = FontStyle.Italic,
-                    letterSpacing = (-1).sp,
-                    color = Color(0xFFDC2626) // red-600
-                )
-            }
-
             Text(
-                text = "OPERATION CENTER",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 4.sp,
-                color = Color(0xFF64748B), // slate-500
-                modifier = Modifier.padding(top = 8.dp)
+                text = "🧪",
+                fontSize = 20.sp
             )
         }
 
-        // Action Buttons
+        // 중앙 콘텐츠
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(40.dp)
         ) {
+            // Header
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "HUNT",
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.Black,
+                        fontStyle = FontStyle.Italic,
+                        letterSpacing = (-1).sp,
+                        color = Color(0xFF3B82F6)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "OR",
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.Black,
+                        fontStyle = FontStyle.Italic,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "HEIST",
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.Black,
+                        fontStyle = FontStyle.Italic,
+                        letterSpacing = (-1).sp,
+                        color = Color(0xFFDC2626)
+                    )
+                }
+                Text(
+                    text = "OPERATION CENTER",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 4.sp,
+                    color = Color(0xFF64748B),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            // Action Buttons
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             // Create Room Button
             Card(
                 onClick = {
@@ -492,34 +508,23 @@ private fun MainActionScreen(
                 )
             }
 
-            // Debug Settings Button
-            TextButton(
-                onClick = onNavigateToDebug,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "🧪 Debug Settings",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF64748B)
-                )
-            }
-
-            // Logout Button
-            TextButton(
-                onClick = onLogout,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "🚪 로그아웃",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFFDC2626) // red-600
-                )
             }
         }
 
-        Spacer(modifier = Modifier.height(80.dp))
+        // 로그아웃 — 하단 고정
+        TextButton(
+            onClick = onLogout,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                text = "🚪 로그아웃",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF64748B)
+            )
+        }
     }
 }
 

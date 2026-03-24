@@ -57,6 +57,7 @@ fun TeamVoicePanel(
                 .fillMaxHeight()
                 .width(280.dp)
                 .background(Color(0xFF0F172A))
+                .navigationBarsPadding()
                 .padding(top = 56.dp, bottom = 16.dp)
         ) {
             Column(

@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.heisthunt.app.viewmodel.GameUiState
+import com.heisthunt.app.viewmodel.ThiefBoundaryViolationState
 import com.heisthunt.app.voice.VoiceChannelManager
 import com.heisthunt.shared.models.Participant
 import com.heisthunt.shared.models.PlayerLocation
@@ -70,6 +71,7 @@ fun GameScreen(
     // Leave game confirmation dialog state
     var showLeaveDialog by remember { mutableStateOf(false) }
     var showTeamPanel by remember { mutableStateOf(false) }
+    var showPlayerListPanel by remember { mutableStateOf(false) }
 
     // BackHandler - show confirmation dialog instead of leaving directly
     PlatformBackHandler(onBack = { showLeaveDialog = true })
@@ -141,6 +143,16 @@ fun GameScreen(
                     )
                 }
 
+                // Thief boundary violation alert (all phases)
+                if (uiState?.thiefBoundaryViolation != null) {
+                    ThiefBoundaryViolationAlert(
+                        myUserId = myUserId,
+                        myRole = myRole,
+                        violation = uiState.thiefBoundaryViolation,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+
                 // Legacy: Police thief detection alert (kept for backward compatibility)
                 // This is now replaced by ProximityAlert but keeping it for now
                 /*
@@ -152,21 +164,35 @@ fun GameScreen(
                 }
                 */
 
-                // Team voice channel button (top-right)
-                if (voiceChannelManager != null) {
+                // Top-right overlay buttons
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 12.dp, end = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Team voice channel button
+                    if (voiceChannelManager != null) {
+                        FloatingActionButton(
+                            onClick = { showTeamPanel = !showTeamPanel; showPlayerListPanel = false },
+                            modifier = Modifier.size(44.dp),
+                            containerColor = Color(0xFF0F172A).copy(alpha = 0.9f),
+                            elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                        ) {
+                            Text(
+                                text = if (myRole == PlayerRole.POLICE) "🚔" else "💰",
+                                fontSize = 18.sp
+                            )
+                        }
+                    }
+                    // Player list button
                     FloatingActionButton(
-                        onClick = { showTeamPanel = !showTeamPanel },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 12.dp, end = 12.dp)
-                            .size(44.dp),
+                        onClick = { showPlayerListPanel = !showPlayerListPanel; showTeamPanel = false },
+                        modifier = Modifier.size(44.dp),
                         containerColor = Color(0xFF0F172A).copy(alpha = 0.9f),
                         elevation = FloatingActionButtonDefaults.elevation(4.dp)
                     ) {
-                        Text(
-                            text = if (myRole == PlayerRole.POLICE) "🚔" else "💰",
-                            fontSize = 18.sp
-                        )
+                        Text(text = "👥", fontSize = 18.sp)
                     }
                 }
             }
@@ -220,6 +246,15 @@ fun GameScreen(
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
+
+        // Player list panel (slides in from right)
+        PlayerListPanel(
+            visible = showPlayerListPanel,
+            participants = uiState?.allParticipants ?: emptyList(),
+            currentPhase = gamePhase,
+            onDismiss = { showPlayerListPanel = false },
+            modifier = Modifier.align(Alignment.CenterEnd)
+        )
     }
 }
 
@@ -559,6 +594,59 @@ private fun PoliceViolationAlert(
                     fontWeight = FontWeight.Bold,
                     color = Color.White.copy(alpha = 0.9f)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThiefBoundaryViolationAlert(
+    myUserId: String,
+    myRole: PlayerRole,
+    violation: ThiefBoundaryViolationState,
+    modifier: Modifier = Modifier
+) {
+    val isMyViolation = violation.thiefUserId == myUserId
+    val bgColor = if (violation.isSentToJail) Color(0xE6991B1B) else Color(0xE6D97706) // red-800 or amber-600
+    val title = when {
+        violation.isSentToJail && isMyViolation -> "⛓️ 감옥 처리!"
+        violation.isSentToJail -> "⛓️ 도둑 감옥 처리!"
+        isMyViolation -> "🚨 반경 이탈!"
+        else -> "🚨 도둑 반경 이탈!"
+    }
+    val subtitle = when {
+        violation.isSentToJail && isMyViolation -> "부정행위로 감옥으로 이동합니다"
+        violation.isSentToJail -> "${violation.thiefNickname} 부정행위로 감옥 처리됨"
+        isMyViolation -> "게임 반경을 벗어났습니다! 경고 ${violation.warningCount}/3"
+        else -> "${violation.thiefNickname} 경고 ${violation.warningCount}/3"
+    }
+    Card(
+        modifier = modifier
+            .fillMaxWidth(0.9f)
+            .padding(top = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = bgColor),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .alpha(
+                    rememberInfiniteTransition().animateFloat(
+                        initialValue = 0.7f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(500),
+                            repeatMode = RepeatMode.Reverse
+                        )
+                    ).value
+                ),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = if (violation.isSentToJail) "⛓️" else "⚠️", fontSize = 24.sp)
+            Column {
+                Text(text = title, fontSize = 16.sp, fontWeight = FontWeight.Black, color = Color.White)
+                Text(text = subtitle, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.9f))
             }
         }
     }

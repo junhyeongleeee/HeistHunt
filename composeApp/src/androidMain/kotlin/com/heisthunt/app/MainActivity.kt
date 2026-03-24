@@ -16,7 +16,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        googleAuthService = GoogleAuthService(applicationContext)
+        googleAuthService = GoogleAuthService(this)
 
         setContent {
             App(

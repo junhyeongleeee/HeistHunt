@@ -22,6 +22,7 @@ import com.heisthunt.app.location.MockLocationService
 @Composable
 fun DebugSettingsScreen(
     onBack: () -> Unit,
+    onVoiceTest: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var mockEnabled by remember { mutableStateOf(MockLocationService.isEnabled) }
@@ -60,6 +61,45 @@ fun DebugSettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Voice Channel Test
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "🎤 Voice Channel Test",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "게임 없이 WebRTC 음성 연결 테스트",
+                                fontSize = 12.sp,
+                                color = Color(0xFF94A3B8)
+                            )
+                        }
+                        Button(
+                            onClick = onVoiceTest,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF6366F1)
+                            )
+                        ) {
+                            Text("열기", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
             // Mock Location Toggle
             item {
                 Card(

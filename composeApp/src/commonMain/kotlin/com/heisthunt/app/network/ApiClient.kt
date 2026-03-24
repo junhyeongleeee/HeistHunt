@@ -103,41 +103,40 @@ class ApiClient(
      *   4. Clears tokens and invokes onForceLogout if refresh fails
      *
      * Auth endpoints under /api/auth/ bypass retry to prevent infinite loops.
+     * Uses status-code-based detection (Ktor 3.x does not throw ResponseException for 4xx by default).
      */
     private suspend fun executeWithRetry(
         path: String,
         block: suspend () -> HttpResponse
     ): HttpResponse {
-        try {
-            return block()
-        } catch (e: ResponseException) {
-            if (e.response.status != HttpStatusCode.Unauthorized || path.startsWith("/api/auth/")) {
-                throw e
-            }
-            println("🔄 [ApiClient] 401 received for $path, attempting token refresh")
-            val tokenBefore = tokenStorage.accessToken
-
-            val refreshed = refreshMutex.withLock {
-                // If token already changed while waiting for lock, a concurrent request
-                // already refreshed it — skip refresh and just retry
-                if (tokenStorage.accessToken != tokenBefore) {
-                    println("🔄 [ApiClient] Token already refreshed by concurrent request")
-                    true
-                } else {
-                    attemptTokenRefresh()
-                }
-            }
-
-            if (!refreshed) {
-                println("❌ [ApiClient] Token refresh failed, clearing tokens and forcing logout")
-                tokenStorage.clear()
-                onForceLogout?.invoke()
-                throw e
-            }
-
-            println("🔄 [ApiClient] Retrying request after token refresh: $path")
-            return block()
+        val response = block()
+        if (response.status != HttpStatusCode.Unauthorized || path.startsWith("/api/auth/")) {
+            return response
         }
+
+        println("🔄 [ApiClient] 401 received for $path, attempting token refresh")
+        val tokenBefore = tokenStorage.accessToken
+
+        val refreshed = refreshMutex.withLock {
+            // If token already changed while waiting for lock, a concurrent request
+            // already refreshed it — skip refresh and just retry
+            if (tokenStorage.accessToken != tokenBefore) {
+                println("🔄 [ApiClient] Token already refreshed by concurrent request")
+                true
+            } else {
+                attemptTokenRefresh()
+            }
+        }
+
+        if (!refreshed) {
+            println("❌ [ApiClient] Token refresh failed, clearing tokens and forcing logout")
+            tokenStorage.clear()
+            onForceLogout?.invoke()
+            return response
+        }
+
+        println("🔄 [ApiClient] Retrying request after token refresh: $path")
+        return block()
     }
 
     // ─── Auth API (no retry — these endpoints set the tokens) ──────────────────

@@ -155,4 +155,12 @@ sealed class WebSocketMessage {
     data class RTCPeerLeft(
         val userId: String
     ) : WebSocketMessage()
+
+    @Serializable
+    data class ThiefBoundaryViolation(
+        val thiefUserId: String,
+        val thiefNickname: String,
+        val warningCount: Int,
+        val isSentToJail: Boolean = false
+    ) : WebSocketMessage()
 }

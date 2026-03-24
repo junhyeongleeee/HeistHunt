@@ -6,7 +6,9 @@ import com.heisthunt.app.location.LocationService
 import com.heisthunt.app.network.GameWebSocketClient
 import com.heisthunt.app.repository.GameRepository
 import com.heisthunt.app.utils.HapticFeedback
+import com.heisthunt.app.voice.PeerConnectionStatus
 import com.heisthunt.app.voice.VoiceChannelManager
+import kotlinx.coroutines.delay
 import com.heisthunt.shared.dto.GameStateResponse
 import com.heisthunt.shared.dto.WebSocketMessage
 import com.heisthunt.shared.models.GameWinner
@@ -34,6 +36,14 @@ data class PoliceViolationState(
 data class ProximityAlertState(
     val enemyRole: PlayerRole,
     val count: Int
+)
+
+data class ThiefBoundaryViolationState(
+    val thiefUserId: String,
+    val thiefNickname: String,
+    val warningCount: Int,
+    val isSentToJail: Boolean,
+    val timestamp: kotlinx.datetime.Instant
 )
 
 data class GameUiState(
@@ -65,8 +75,11 @@ data class GameUiState(
     // Phase-based alerts
     val policeViolation: PoliceViolationState? = null, // For thief in ESCAPE: police left jail
     val nearbyEnemies: ProximityAlertState? = null, // For both in CHASE: enemies within 5m
+    val thiefBoundaryViolation: ThiefBoundaryViolationState? = null, // Thief out of bounds
     // Game result
-    val gameResult: com.heisthunt.shared.dto.GameResultResponse? = null
+    val gameResult: com.heisthunt.shared.dto.GameResultResponse? = null,
+    // All participants list (for player list panel)
+    val allParticipants: List<Participant> = emptyList()
 )
 
 class GameViewModel(
@@ -94,7 +107,8 @@ class GameViewModel(
             startTime = startTime,
             escapeDurationSeconds = escapeDurationSeconds,
             totalDurationSeconds = totalDurationSeconds,
-            catchableThieves = participants.filter { it.role == PlayerRole.THIEF && !it.isCaught }
+            catchableThieves = participants.filter { it.role == PlayerRole.THIEF && !it.isCaught },
+            allParticipants = participants
         )
     )
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
@@ -228,9 +242,15 @@ class GameViewModel(
                 updateNearbyPolice()  // For thieves
             }
             is WebSocketMessage.PlayerCaught -> {
-                println("Player caught: ${event.nickname}")
+                println("Player caught: ${event.nickname} (${event.userId})")
                 _uiState.update {
-                    it.copy(error = "${event.nickname} has been caught!")
+                    it.copy(
+                        error = "${event.nickname} has been caught!",
+                        catchableThieves = it.catchableThieves.filter { p -> p.userId != event.userId },
+                        allParticipants = it.allParticipants.map { p ->
+                            if (p.userId == event.userId) p.copy(isCaught = true) else p
+                        }
+                    )
                 }
                 // Reload game status to get updated counts
                 loadGameStatus()
@@ -261,7 +281,10 @@ class GameViewModel(
                 _uiState.update {
                     it.copy(
                         error = "${event.thiefNickname}가 체포되었습니다!",
-                        catchableThieves = it.catchableThieves.filter { p -> p.userId != event.thiefUserId }
+                        catchableThieves = it.catchableThieves.filter { p -> p.userId != event.thiefUserId },
+                        allParticipants = it.allParticipants.map { p ->
+                            if (p.userId == event.thiefUserId) p.copy(isCaught = true) else p
+                        }
                     )
                 }
 
@@ -292,10 +315,7 @@ class GameViewModel(
             }
             is WebSocketMessage.PhaseChanged -> {
                 println("Phase changed to ${event.phase}: ${event.message}")
-                _uiState.update {
-                    it.copy(error = event.message)
-                }
-                // 게임 상태 새로고침하여 phase 업데이트
+                // error 상태로 쓰지 않음 - loadGameStatus()로 phase 반영
                 loadGameStatus()
             }
             is WebSocketMessage.GameEnded -> {
@@ -326,8 +346,7 @@ class GameViewModel(
                         _uiState.update {
                             it.copy(
                                 isGameEnded = true,
-                                winner = event.winner,
-                                error = "Game ended: ${event.winner.name} wins!"
+                                winner = event.winner
                             )
                         }
                     }
@@ -376,6 +395,21 @@ class GameViewModel(
                 if (event.count > 0 && (_uiState.value.nearbyEnemies?.count ?: 0) == 0) {
                     if (shouldVibrate()) hapticFeedback.light()
                 }
+            }
+            is WebSocketMessage.ThiefBoundaryViolation -> {
+                println("⚠️ [GameViewModel] ThiefBoundaryViolation: ${event.thiefNickname}, warning=${event.warningCount}, jail=${event.isSentToJail}")
+                _uiState.update {
+                    it.copy(
+                        thiefBoundaryViolation = ThiefBoundaryViolationState(
+                            thiefUserId = event.thiefUserId,
+                            thiefNickname = event.thiefNickname,
+                            warningCount = event.warningCount,
+                            isSentToJail = event.isSentToJail,
+                            timestamp = Clock.System.now()
+                        )
+                    )
+                }
+                if (shouldVibrate()) hapticFeedback.warning()
             }
             is WebSocketMessage.RTCOffer -> {
                 println("📡 [Voice] Received RTCOffer from ${event.fromUserId}")
@@ -659,10 +693,17 @@ class GameViewModel(
         _uiState.update { it.copy(error = null) }
     }
 
+    fun dismissThiefBoundaryViolation() {
+        _uiState.update { it.copy(thiefBoundaryViolation = null) }
+    }
+
     fun leaveGame() {
         println("🚪 Leaving game: $gameId")
         stopLocationTracking()
         viewModelScope.launch {
+            // WS 먼저 끊어서 leave 과정 중 에러 이벤트 수신 방지
+            wsClient.disconnect()
+
             // Call server API to leave game
             gameRepository.leaveGame(gameId)
                 .onSuccess {
@@ -674,9 +715,6 @@ class GameViewModel(
 
             // Disconnect voice channel
             voiceChannelManager?.dispose()
-
-            // Disconnect WebSocket
-            wsClient.disconnect()
 
             // Reset UI state to initial values
             _uiState.update {
@@ -704,7 +742,15 @@ class GameViewModel(
 
     private fun joinVoiceChannel() {
         val vm = voiceChannelManager ?: return
-        println("🎙️ [Voice] Initializing voice channel: role=$myRole, myUserId=$myUserId")
+        val sameRoleTeammates = participants.filter { it.role == myRole && it.userId != myUserId }
+
+        // 같은 역할 팀원이 없으면 음성 채널 초기화 불필요 (IDLE 유지)
+        if (sameRoleTeammates.isEmpty()) {
+            println("🎙️ [Voice] No same-role teammates, skipping voice channel init")
+            return
+        }
+
+        println("🎙️ [Voice] Initializing voice channel: role=$myRole, myUserId=$myUserId, teammates=${sameRoleTeammates.size}")
         vm.initialize(myUserId)
 
         // ICE candidate callback → relay via WebSocket
@@ -714,16 +760,40 @@ class GameViewModel(
             }
         }
 
-        // Create offers for same-role teammates; lower userId initiates to avoid collision
-        val sameRoleTeammates = participants.filter { it.role == myRole && it.userId != myUserId }
         sameRoleTeammates.forEach { teammate ->
             vm.setPeerNickname(teammate.userId, teammate.nickname)
-            if (myUserId < teammate.userId) {
-                viewModelScope.launch {
-                    val sdp = vm.createOfferFor(teammate.userId)
-                    if (sdp != null) {
-                        wsClient.sendRTCOffer(myUserId, teammate.userId, sdp)
-                        println("📡 [Voice] Sent RTCOffer to ${teammate.userId}")
+        }
+
+        viewModelScope.launch {
+            // WebSocket CONNECTED 상태까지 대기
+            wsClient.connectionState.first { it == GameWebSocketClient.ConnectionState.CONNECTED }
+            // 상대방 WebSocket 연결 대기 (레이스 컨디션 방지)
+            delay(3000)
+            println("🎙️ [Voice] WebSocket connected, sending RTC offers")
+
+            sameRoleTeammates.forEach { teammate ->
+                if (myUserId < teammate.userId) {
+                    launch {
+                        // 최대 6회 재시도 (5초 간격, 총 30초)
+                        repeat(6) { attempt ->
+                            val alreadyConnected = vm.peerStates.value[teammate.userId]
+                                ?.connectionStatus == PeerConnectionStatus.CONNECTED
+                            if (alreadyConnected) return@repeat
+
+                            if (attempt > 0) {
+                                println("🔄 [Voice] Retry $attempt: resending offer to ${teammate.userId}")
+                                vm.removePeer(teammate.userId)
+                                delay(5000)
+                            }
+
+                            val sdp = vm.createOfferFor(teammate.userId)
+                            if (sdp != null) {
+                                wsClient.sendRTCOffer(myUserId, teammate.userId, sdp)
+                                println("📡 [Voice] Sent RTCOffer to ${teammate.userId} (attempt ${attempt + 1})")
+                            }
+
+                            if (attempt < 5) delay(5000)
+                        }
                     }
                 }
             }
